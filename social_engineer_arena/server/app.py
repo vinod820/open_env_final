@@ -385,13 +385,13 @@ def attach_showcase_routes(app: FastAPI) -> None:
 </html>"""
 
 
+app = FastAPI(title="SocialEngineerArena")
+attach_showcase_routes(app)
+
 if os.getenv("ENABLE_WEB_INTERFACE", "true").lower() == "true" and create_web_interface_app:
-    # openenv-core expects an environment class/factory, not an instantiated object.
-    app = create_web_interface_app(SocialEngineerArenaEnvironment, ArenaAction, ArenaObservation)
-    attach_showcase_routes(app)
-else:
-    app = FastAPI(title="SocialEngineerArena")
-    attach_showcase_routes(app)
+    # Keep custom showcase as primary app and mount OpenEnv web UI separately.
+    web_app = create_web_interface_app(SocialEngineerArenaEnvironment, ArenaAction, ArenaObservation)
+    app.mount("/web", web_app)
 
 
 def main() -> None:
