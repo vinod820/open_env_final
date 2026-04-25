@@ -1,3 +1,12 @@
+---
+title: SocialEngineerArena
+emoji: "🛡️"
+colorFrom: blue
+colorTo: green
+sdk: docker
+pinned: false
+---
+
 # SocialEngineerArena
 
 SocialEngineerArena is an OpenEnv-compatible RL environment for teaching LLMs to both:

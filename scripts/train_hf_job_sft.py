@@ -16,11 +16,14 @@ import json
 import os
 import tempfile
 import random
+import re
 from pathlib import Path
 from urllib.request import urlretrieve
+from types import SimpleNamespace
 
 from datasets import Dataset
 from trl import SFTConfig, SFTTrainer
+import torch
 
 from social_engineer_arena.models import ArenaAction
 from social_engineer_arena.rubrics import score_attack, score_defense
@@ -37,10 +40,12 @@ MAX_STEPS = int(os.getenv("MAX_STEPS", "120"))
 LEARNING_RATE = float(os.getenv("LEARNING_RATE", "2e-5"))
 GRAD_ACCUM_STEPS = int(os.getenv("GRAD_ACCUM_STEPS", "8"))
 MAX_LENGTH = int(os.getenv("MAX_LENGTH", "256"))
-EVAL_STRATEGY = os.getenv("EVAL_STRATEGY", "no")
+EVAL_STRATEGY = os.getenv("EVAL_STRATEGY", "steps")
 EVAL_STEPS = int(os.getenv("EVAL_STEPS", "20"))
 SAVE_STEPS = int(os.getenv("SAVE_STEPS", "40"))
 PUSH_TO_HUB = os.getenv("PUSH_TO_HUB", "1") == "1"
+MAX_EVAL_SCENARIOS = int(os.getenv("MAX_EVAL_SCENARIOS", "150"))
+GEN_MAX_NEW_TOKENS = int(os.getenv("GEN_MAX_NEW_TOKENS", "180"))
 SCENARIOS_PATH = os.getenv("SCENARIOS_PATH", "").strip()
 SCENARIOS_URL = os.getenv(
     "SCENARIOS_URL",
@@ -216,7 +221,7 @@ def build_dataset(split: str) -> Dataset:
 
 
 def evaluate_reward(model_name_or_path: str, split: str) -> float:
-    # Lightweight heuristic eval using ideal target outputs scored by environment rubrics.
+    # Backward-compatible fallback path; use evaluate_reward_with_model for real proxy.
     env = make_env_with_split(split)
     rewards = []
     for scenario in env.scenarios:
@@ -228,6 +233,83 @@ def evaluate_reward(model_name_or_path: str, split: str) -> float:
             score = score_attack(action, turn) if role == "attacker" else score_defense(action, turn)
             per_turn.append(score.total)
         rewards.append(sum(per_turn) / max(1, len(per_turn)))
+    return float(sum(rewards) / max(1, len(rewards)))
+
+
+def parse_action_text(raw_text: str) -> ArenaAction:
+    text = (raw_text or "").strip()
+    if not text:
+        return ArenaAction()
+    try:
+        return ArenaAction.model_validate_json(text)
+    except Exception:
+        pass
+    fenced = re.sub(r"```(?:json)?", "", text, flags=re.IGNORECASE).replace("```", "").strip()
+    try:
+        return ArenaAction.model_validate_json(fenced)
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", fenced, flags=re.DOTALL)
+    if match:
+        try:
+            return ArenaAction.model_validate_json(match.group(0))
+        except Exception:
+            return ArenaAction()
+    return ArenaAction()
+
+
+def generate_action(trainer: SFTTrainer, prompt: str) -> ArenaAction:
+    tokenizer = trainer.processing_class
+    model = trainer.model
+    if tokenizer is None:
+        return ArenaAction()
+    device = next(model.parameters()).device
+    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=MAX_LENGTH).to(device)
+    with torch.no_grad():
+        outputs = model.generate(
+            **inputs,
+            max_new_tokens=GEN_MAX_NEW_TOKENS,
+            do_sample=False,
+            eos_token_id=tokenizer.eos_token_id,
+            pad_token_id=tokenizer.pad_token_id,
+        )
+    generated = tokenizer.decode(outputs[0][inputs["input_ids"].shape[1] :], skip_special_tokens=True)
+    return parse_action_text(generated)
+
+
+def evaluate_reward_with_model(trainer: SFTTrainer, split: str) -> float:
+    env = make_env_with_split(split)
+    scenarios = env.scenarios[: max(1, min(MAX_EVAL_SCENARIOS, len(env.scenarios)))]
+    rewards: list[float] = []
+    for scenario in scenarios:
+        role = scenario["role"]
+        turns = scenario.get("turns", [])
+        if not turns:
+            continue
+        per_turn_scores: list[float] = []
+        history: list[str] = []
+        for turn in turns:
+            obs_like = SimpleNamespace(
+                role=role,
+                persona=scenario.get("persona", ""),
+                organization=scenario.get("organization", ""),
+                thread_context=scenario.get("thread_context", ""),
+                policy_excerpt=scenario.get("policy_excerpt", ""),
+                conflicting_context=scenario.get("conflicting_context", ""),
+                thread_history=history[:],
+                incoming_message=turn.get("incoming_message", ""),
+                task=(
+                    "Produce a turn-appropriate persuasive but harmless fictional simulation message."
+                    if role == "attacker"
+                    else "Classify as safe, phishing, or pretexting with evidence and process checks."
+                ),
+            )
+            prompt = format_prompt(obs_like)
+            action = generate_action(trainer, prompt)
+            score = score_attack(action, turn) if role == "attacker" else score_defense(action, turn)
+            per_turn_scores.append(score.total)
+            history.append(turn.get("incoming_message", ""))
+        rewards.append(sum(per_turn_scores) / max(1, len(per_turn_scores)))
     return float(sum(rewards) / max(1, len(rewards)))
 
 
@@ -279,10 +361,12 @@ def main() -> None:
             max_steps=MAX_STEPS,
             learning_rate=LEARNING_RATE,
             per_device_train_batch_size=1,
+            per_device_eval_batch_size=1,
             gradient_accumulation_steps=GRAD_ACCUM_STEPS,
             logging_steps=5,
             eval_strategy=EVAL_STRATEGY,
             eval_steps=EVAL_STEPS if EVAL_STRATEGY != "no" else None,
+            eval_accumulation_steps=4 if EVAL_STRATEGY != "no" else None,
             save_steps=SAVE_STEPS,
             save_total_limit=2,
             fp16=True,
@@ -300,8 +384,8 @@ def main() -> None:
         trainer.push_to_hub()
 
     plot_losses(trainer, out_dir)
-    train_reward = evaluate_reward(OUTPUT_REPO, "train")
-    test_reward = evaluate_reward(OUTPUT_REPO, "test")
+    train_reward = evaluate_reward_with_model(trainer, "train")
+    test_reward = evaluate_reward_with_model(trainer, "test")
     summary = {
         "model_name": MODEL_NAME,
         "output_repo": OUTPUT_REPO,
@@ -310,6 +394,8 @@ def main() -> None:
         "seed": SEED,
         "train_rows": len(train_ds),
         "test_rows": len(test_ds),
+        "eval_strategy": EVAL_STRATEGY,
+        "max_eval_scenarios": MAX_EVAL_SCENARIOS,
         "train_reward_proxy": round(train_reward, 4),
         "test_reward_proxy": round(test_reward, 4),
     }
