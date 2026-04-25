@@ -33,6 +33,14 @@ OUTPUT_DIR = os.getenv("OUTPUT_DIR", "outputs/social_engineer_arena_sft")
 DATA_MULTIPLIER = int(os.getenv("DATA_MULTIPLIER", "40"))
 SEED = int(os.getenv("SEED", "42"))
 DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
+MAX_STEPS = int(os.getenv("MAX_STEPS", "120"))
+LEARNING_RATE = float(os.getenv("LEARNING_RATE", "2e-5"))
+GRAD_ACCUM_STEPS = int(os.getenv("GRAD_ACCUM_STEPS", "8"))
+MAX_LENGTH = int(os.getenv("MAX_LENGTH", "256"))
+EVAL_STRATEGY = os.getenv("EVAL_STRATEGY", "no")
+EVAL_STEPS = int(os.getenv("EVAL_STEPS", "20"))
+SAVE_STEPS = int(os.getenv("SAVE_STEPS", "40"))
+PUSH_TO_HUB = os.getenv("PUSH_TO_HUB", "1") == "1"
 SCENARIOS_PATH = os.getenv("SCENARIOS_PATH", "").strip()
 SCENARIOS_URL = os.getenv(
     "SCENARIOS_URL",
@@ -268,24 +276,28 @@ def main() -> None:
         eval_dataset=test_ds,
         args=SFTConfig(
             output_dir=str(out_dir),
-            max_steps=120,
-            learning_rate=2e-5,
+            max_steps=MAX_STEPS,
+            learning_rate=LEARNING_RATE,
             per_device_train_batch_size=1,
-            gradient_accumulation_steps=8,
+            gradient_accumulation_steps=GRAD_ACCUM_STEPS,
             logging_steps=5,
-            eval_strategy="steps",
-            eval_steps=20,
-            save_steps=40,
+            eval_strategy=EVAL_STRATEGY,
+            eval_steps=EVAL_STEPS if EVAL_STRATEGY != "no" else None,
+            save_steps=SAVE_STEPS,
             save_total_limit=2,
             fp16=True,
+            gradient_checkpointing=True,
+            max_length=MAX_LENGTH,
+            prediction_loss_only=True,
             report_to="none",
-            push_to_hub=True,
+            push_to_hub=PUSH_TO_HUB,
             hub_model_id=OUTPUT_REPO,
             hub_strategy="every_save",
         ),
     )
     trainer.train()
-    trainer.push_to_hub()
+    if PUSH_TO_HUB:
+        trainer.push_to_hub()
 
     plot_losses(trainer, out_dir)
     train_reward = evaluate_reward(OUTPUT_REPO, "train")
