@@ -65,8 +65,7 @@ class SocialEngineerArenaEnvironment(Environment[ArenaAction, ArenaObservation, 
             raise RuntimeError("Call reset() before step().")
         scenario = self._scenario_by_id(self._state.scenario_id)
         if self._state.done:
-            observation = self._observation(scenario)
-            return observation, self._state.last_reward or 0.0, True
+            raise RuntimeError("Episode is complete. Call reset() to start a new episode.")
 
         turn_scenario = self._turn_scenario(scenario, self._state.turn_index)
         breakdown = (

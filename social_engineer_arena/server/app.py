@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
 import os
+import re
+from urllib import error, request
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
@@ -14,6 +17,88 @@ from social_engineer_arena.server.environment import SocialEngineerArenaEnvironm
 
 
 env = SocialEngineerArenaEnvironment()
+
+
+def _suggest_prompt(obs: ArenaObservation) -> str:
+    history = "\n".join(obs.thread_history) if obs.thread_history else "(none)"
+    return f"""You are assisting in SocialEngineerArena.
+Role: {obs.role}
+Persona: {obs.persona}
+Organization: {obs.organization}
+Policy Excerpt: {obs.policy_excerpt}
+Conflicting Context: {obs.conflicting_context}
+Thread Context: {obs.thread_context}
+Thread History:
+{history}
+Incoming Message: {obs.incoming_message}
+Task: {obs.task}
+
+Return ONLY one JSON object with keys:
+verdict, explanation, cues_found, response, safety_boundary.
+"""
+
+
+def _parse_action_json(text: str) -> ArenaAction:
+    raw = (text or "").strip()
+    if not raw:
+        raise ValueError("Model returned empty output.")
+    try:
+        return ArenaAction.model_validate_json(raw)
+    except Exception:
+        pass
+    match = re.search(r"\{.*\}", raw, flags=re.DOTALL)
+    if not match:
+        raise ValueError("Model output did not contain a valid JSON object.")
+    return ArenaAction.model_validate_json(match.group(0))
+
+
+def _generate_suggestion(obs: ArenaObservation) -> tuple[ArenaAction, str]:
+    model_id = os.getenv("SUGGEST_MODEL_ID", "").strip()
+    endpoint_url = os.getenv("HF_ENDPOINT_URL", "").strip()
+    hf_token = os.getenv("HF_TOKEN", "").strip()
+    max_new_tokens = int(os.getenv("SUGGEST_MAX_NEW_TOKENS", "180"))
+    if not model_id and not endpoint_url:
+        raise RuntimeError(
+            "No suggestion model configured. Set SUGGEST_MODEL_ID or HF_ENDPOINT_URL."
+        )
+    if not hf_token:
+        raise RuntimeError("HF_TOKEN is required for model-backed suggestion.")
+
+    target_url = endpoint_url or f"https://api-inference.huggingface.co/models/{model_id}"
+    payload = {
+        "inputs": _suggest_prompt(obs),
+        "parameters": {
+            "max_new_tokens": max_new_tokens,
+            "temperature": 0.2,
+            "return_full_text": False,
+        },
+    }
+    req = request.Request(
+        target_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {hf_token}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with request.urlopen(req, timeout=45) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Suggestion request failed ({exc.code}): {detail}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Suggestion request failed: {exc}") from exc
+
+    generated = ""
+    if isinstance(body, list) and body and isinstance(body[0], dict):
+        generated = body[0].get("generated_text", "")
+    elif isinstance(body, dict):
+        generated = body.get("generated_text", "")
+    action = _parse_action_json(generated)
+    source = endpoint_url or model_id
+    return action, source
 
 
 def attach_showcase_routes(app: FastAPI) -> None:
@@ -38,6 +123,16 @@ def attach_showcase_routes(app: FastAPI) -> None:
     def state_handler() -> ArenaState:
         return env.state
 
+    def suggest_handler() -> dict:
+        if not env.state.episode_id:
+            raise RuntimeError("Call reset() before suggest().")
+        if env.state.done:
+            raise RuntimeError("Episode is complete. Call reset() to start a new episode.")
+        scenario = env._scenario_by_id(env.state.scenario_id)
+        obs = env._observation(scenario)
+        action, source = _generate_suggestion(obs)
+        return {"action": action, "source": source}
+
     @app.post("/reset")
     def reset() -> ArenaObservation:
         return reset_handler()
@@ -50,6 +145,13 @@ def attach_showcase_routes(app: FastAPI) -> None:
     def state() -> ArenaState:
         return state_handler()
 
+    @app.post("/suggest")
+    def suggest() -> dict:
+        try:
+            return suggest_handler()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
     @app.post("/api/reset")
     def api_reset() -> ArenaObservation:
         return reset_handler()
@@ -61,6 +163,13 @@ def attach_showcase_routes(app: FastAPI) -> None:
     @app.get("/api/state")
     def api_state() -> ArenaState:
         return state_handler()
+
+    @app.post("/api/suggest")
+    def api_suggest() -> dict:
+        try:
+            return suggest_handler()
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/arena", response_class=HTMLResponse)
     def arena_showcase() -> str:
@@ -118,7 +227,7 @@ def attach_showcase_routes(app: FastAPI) -> None:
       <div class="panel">
         <div class="label">Interaction Mode</div>
         <div class="form-grid">
-          <div><select id="modeSelect" aria-label="Action mode"><option value="manual">Manual (you decide)</option><option value="assisted">Assisted (rule suggestion)</option></select></div>
+          <div><select id="modeSelect" aria-label="Action mode"><option value="manual">Manual (you decide)</option><option value="assisted">Assisted (model suggestion)</option></select></div>
           <div><input id="boundaryPreset" value="Defensive analysis only." aria-label="Safety boundary preset" /></div>
         </div>
         <div class="label">Reward Meter</div>
@@ -167,23 +276,27 @@ def attach_showcase_routes(app: FastAPI) -> None:
     const modeSelectEl = $("modeSelect"); const verdictEl = $("verdict"); const explanationEl = $("explanation"); const cuesFoundEl = $("cuesFound"); const responseEl = $("response"); const safetyBoundaryEl = $("safetyBoundary"); const boundaryPresetEl = $("boundaryPreset");
     function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1500); }
     function setBusy(v) { for (const id of ["resetBtn","stepBtn","suggestBtn","clearBtn"]) $(id).disabled = v; }
+    function syncActionControls() {
+      const done = !!(observation && observation.done);
+      $("stepBtn").disabled = done;
+      $("suggestBtn").disabled = done;
+    }
     function updateKpis() { $("kpiEpisodes").textContent = String(episodeCount); $("kpiActions").textContent = String(actionLog.length); $("kpiDone").textContent = String(completedEpisodes); const avg = rewardHistory.length ? rewardHistory.reduce((a,b)=>a+b,0)/rewardHistory.length : 0; $("kpiAvg").textContent = avg.toFixed(3); }
     function setReward(v) { rewardValueEl.textContent = Number(v).toFixed(3); rewardValueEl.className = "reward " + (v >= 0.7 ? "good" : v >= 0.35 ? "mid" : "bad"); rewardHistory.push(v); if (rewardHistory.length > 60) rewardHistory.shift(); drawSparkline(); updateKpis(); }
     function drawSparkline() { const canvas = $("spark"); const ctx = canvas.getContext("2d"); const ratio = window.devicePixelRatio || 1; canvas.width = canvas.clientWidth * ratio; canvas.height = canvas.clientHeight * ratio; ctx.setTransform(ratio,0,0,ratio,0,0); const w = canvas.clientWidth; const h = canvas.clientHeight; ctx.clearRect(0,0,w,h); if (!rewardHistory.length) return; ctx.strokeStyle = "rgba(255,255,255,.18)"; ctx.lineWidth = 1; for (const y of [0.25,0.5,0.75]) { ctx.beginPath(); ctx.moveTo(0,h*y); ctx.lineTo(w,h*y); ctx.stroke(); } const step = w / Math.max(1, rewardHistory.length - 1); const grad = ctx.createLinearGradient(0,0,w,0); grad.addColorStop(0,"#00d8c2"); grad.addColorStop(1,"#7c6dff"); ctx.strokeStyle = grad; ctx.lineWidth = 2.4; ctx.beginPath(); rewardHistory.forEach((r,i) => { const x = i*step; const y = h - Math.max(0,Math.min(1,r))*h; if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }); ctx.stroke(); }
     function clearErrors() { $("errorSummary").classList.remove("show"); $("errorSummary").textContent = ""; for (const id of ["verdictErr","boundaryErr","explanationErr","cuesErr"]) $(id).textContent = ""; for (const id of ["verdict","safetyBoundary","explanation","cuesFound"]) $(id).classList.remove("error"); }
     function validateForm() { clearErrors(); const errors = []; const explanation = explanationEl.value.trim(); const boundary = safetyBoundaryEl.value.trim(); const cues = cuesFoundEl.value.split(",").map((x)=>x.trim()).filter(Boolean); if (!verdictEl.value) { errors.push("Verdict is required."); $("verdictErr").textContent = "Choose a verdict."; verdictEl.classList.add("error"); } if (explanation.length < 16) { errors.push("Explanation should be at least 16 characters."); $("explanationErr").textContent = "Add evidence-based reasoning."; explanationEl.classList.add("error"); } if (!boundary) { errors.push("Safety boundary cannot be empty."); $("boundaryErr").textContent = "Set a clear safety boundary."; safetyBoundaryEl.classList.add("error"); } if (cues.length === 0) { errors.push("Add at least one cue."); $("cuesErr").textContent = "Add at least one cue."; cuesFoundEl.classList.add("error"); } if (errors.length) { const summary = $("errorSummary"); summary.textContent = "Please fix: " + errors.join(" "); summary.classList.add("show"); return false; } return true; }
-    function inferVerdict(message) { const m = (message || "").toLowerCase(); const bad = ["urgent","verify","password","otp","gift card","wire","bank","account suspended","click","final warning","payroll"]; const score = bad.reduce((n,t)=>n+(m.includes(t)?1:0),0); if (score >= 3) return "phishing"; if (score >= 1) return "pretexting"; return "safe"; }
-    function suggestAction() { if (!observation) { toast("Start episode first"); return; } const mode = modeSelectEl.value; const inferred = inferVerdict(observation.incoming_message); const isAssisted = mode === "assisted"; verdictEl.value = inferred; explanationEl.value = isAssisted ? "Assisted suggestion: verdict inferred from urgency, process bypass signals, and potential credential solicitation cues in the incoming message." : "Manual-ready draft: validate sender authenticity, urgency pressure, and process conformance before confirming final verdict."; cuesFoundEl.value = isAssisted ? "urgency pressure, process bypass attempt, sender authenticity risk" : "sender verification pending"; responseEl.value = inferred === "safe" ? "Acknowledged. Processing through normal approved workflow." : "This request requires out-of-band verification through approved policy channels."; safetyBoundaryEl.value = boundaryPresetEl.value.trim() || "Defensive analysis only."; toast("Suggestion applied"); }
+    async function suggestAction() { if (!observation) { toast("Start episode first"); return; } if (observation.done) { toast("Episode complete. Start a new episode."); syncActionControls(); return; } setBusy(true); try { const res = await fetch("suggest", { method:"POST" }); const out = await res.json(); if (!res.ok) throw new Error(out.detail || "Suggest failed"); const action = out.action || {}; verdictEl.value = action.verdict || "unknown"; explanationEl.value = action.explanation || ""; cuesFoundEl.value = Array.isArray(action.cues_found) ? action.cues_found.join(", ") : ""; responseEl.value = action.response || ""; safetyBoundaryEl.value = action.safety_boundary || boundaryPresetEl.value.trim() || "Defensive analysis only."; toast("Suggestion loaded from model"); } catch (e) { resultBoxEl.textContent = "Suggest error: " + e.message; toast("Suggestion unavailable"); } finally { setBusy(false); syncActionControls(); } }
     function pushEvent(title, details, reward, done) { const item = { at:new Date().toLocaleTimeString(), title, details, reward, done }; actionLog.unshift(item); const host = $("timeline"); host.innerHTML = actionLog.slice(0,50).map((e)=>( '<div class="event"><div class="meta">' + e.at + " • " + e.title + (e.done ? " • episode complete" : "") + '</div><div>' + e.details.replace(/</g,"&lt;").replace(/>/g,"&gt;") + '</div><div class="meta">reward: ' + Number(e.reward || 0).toFixed(3) + '</div></div>' )).join(""); updateKpis(); }
     async function checkHealth() { try { const res = await fetch("health"); if (!res.ok) throw new Error("bad"); $("apiStatus").textContent = "online"; $("healthDot").style.background = "var(--ok)"; $("healthDot").style.boxShadow = "0 0 14px rgba(87,226,157,.7)"; } catch (_e) { $("apiStatus").textContent = "offline"; $("healthDot").style.background = "var(--bad)"; $("healthDot").style.boxShadow = "0 0 14px rgba(255,107,136,.6)"; } }
-    async function resetScenario() { setBusy(true); clearErrors(); try { const res = await fetch("reset", { method:"POST" }); if (!res.ok) throw new Error("Reset failed"); observation = await res.json(); episodeCount += 1; $("rolePill").textContent = observation.role; $("scenarioPill").textContent = observation.scenario_id; $("episodePill").textContent = String(episodeCount); $("stepPill").textContent = String(observation.turn_index); $("incomingMessage").textContent = observation.incoming_message; $("contextBox").textContent = ["Channel: " + observation.channel, "Persona: " + observation.persona, "Organization: " + observation.organization, "Task: " + observation.task, "", "Policy:", observation.policy_excerpt || "(none)", "", "Thread Context:", observation.thread_context || "(none)"].join("\\n"); resultBoxEl.textContent = "Episode initialized. Prepare action and submit."; safetyBoundaryEl.value = boundaryPresetEl.value.trim() || "Defensive analysis only."; pushEvent("Episode started", "Scenario " + observation.scenario_id + " loaded.", 0, false); toast("Episode loaded"); } catch (e) { resultBoxEl.textContent = "Error: " + e.message; } finally { setBusy(false); } }
-    async function submitAction() { if (!observation) { toast("Start episode first"); return; } if (!validateForm()) return; setBusy(true); try { const payload = { verdict: verdictEl.value, explanation: explanationEl.value.trim(), cues_found: cuesFoundEl.value.split(",").map((x)=>x.trim()).filter(Boolean), response: responseEl.value.trim(), safety_boundary: safetyBoundaryEl.value.trim() }; const res = await fetch("step", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) }); const out = await res.json(); if (!res.ok) throw new Error(out.detail || "Step failed"); observation = out.observation; $("stepPill").textContent = String(observation.turn_index); $("incomingMessage").textContent = observation.incoming_message; const reward = Number(out.reward || 0); setReward(reward); if (out.done) completedEpisodes += 1; const breakdown = out?.observation?.reward_breakdown || {}; resultBoxEl.textContent = ["done: " + out.done, "reward: " + reward.toFixed(3), "", "breakdown:", JSON.stringify(breakdown, null, 2)].join("\\n"); pushEvent("Action submitted", "Verdict: " + payload.verdict + " | cues: " + payload.cues_found.slice(0,3).join(", "), reward, !!out.done); if (out.done) toast("Episode complete"); else toast("Turn scored"); } catch (e) { resultBoxEl.textContent = "Error: " + e.message; } finally { setBusy(false); } }
+    async function resetScenario() { setBusy(true); clearErrors(); try { const res = await fetch("reset", { method:"POST" }); if (!res.ok) throw new Error("Reset failed"); observation = await res.json(); episodeCount += 1; $("rolePill").textContent = observation.role; $("scenarioPill").textContent = observation.scenario_id; $("episodePill").textContent = String(episodeCount); $("stepPill").textContent = String(observation.turn_index); $("incomingMessage").textContent = observation.incoming_message; $("contextBox").textContent = ["Channel: " + observation.channel, "Persona: " + observation.persona, "Organization: " + observation.organization, "Task: " + observation.task, "", "Policy:", observation.policy_excerpt || "(none)", "", "Thread Context:", observation.thread_context || "(none)"].join("\\n"); resultBoxEl.textContent = "Episode initialized. Prepare action and submit."; safetyBoundaryEl.value = boundaryPresetEl.value.trim() || "Defensive analysis only."; pushEvent("Episode started", "Scenario " + observation.scenario_id + " loaded.", 0, false); toast("Episode loaded"); } catch (e) { resultBoxEl.textContent = "Error: " + e.message; } finally { setBusy(false); syncActionControls(); } }
+    async function submitAction() { if (!observation) { toast("Start episode first"); return; } if (observation.done) { toast("Episode complete. Start a new episode."); syncActionControls(); return; } if (!validateForm()) return; setBusy(true); try { const payload = { verdict: verdictEl.value, explanation: explanationEl.value.trim(), cues_found: cuesFoundEl.value.split(",").map((x)=>x.trim()).filter(Boolean), response: responseEl.value.trim(), safety_boundary: safetyBoundaryEl.value.trim() }; const res = await fetch("step", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) }); const out = await res.json(); if (!res.ok) throw new Error(out.detail || "Step failed"); observation = out.observation; $("stepPill").textContent = String(observation.turn_index); $("incomingMessage").textContent = observation.incoming_message; const reward = Number(out.reward || 0); setReward(reward); if (out.done) completedEpisodes += 1; const breakdown = out?.observation?.reward_breakdown || {}; resultBoxEl.textContent = ["done: " + out.done, "reward: " + reward.toFixed(3), "", "breakdown:", JSON.stringify(breakdown, null, 2)].join("\\n"); pushEvent("Action submitted", "Verdict: " + payload.verdict + " | cues: " + payload.cues_found.slice(0,3).join(", "), reward, !!out.done); if (out.done) toast("Episode complete"); else toast("Turn scored"); } catch (e) { resultBoxEl.textContent = "Error: " + e.message; } finally { setBusy(false); syncActionControls(); } }
     function clearForm() { explanationEl.value = ""; cuesFoundEl.value = ""; responseEl.value = ""; verdictEl.value = "unknown"; safetyBoundaryEl.value = boundaryPresetEl.value.trim() || "Defensive analysis only."; clearErrors(); toast("Form cleared"); }
     function persistPrefs() { localStorage.setItem("sea_mode", modeSelectEl.value); localStorage.setItem("sea_boundary", boundaryPresetEl.value); }
     function loadPrefs() { modeSelectEl.value = localStorage.getItem("sea_mode") || "manual"; boundaryPresetEl.value = localStorage.getItem("sea_boundary") || "Defensive analysis only."; safetyBoundaryEl.value = boundaryPresetEl.value; }
     function bootParticles() { const canvas = $("particles"); const ctx = canvas.getContext("2d"); let w = 0; let h = 0; const dots = Array.from({ length:42 }).map(() => ({ x:Math.random(), y:Math.random(), r:Math.random()*2.2+.8, vx:(Math.random()-0.5)*0.0005, vy:(Math.random()-0.5)*0.0005 })); function resize() { w = canvas.clientWidth = window.innerWidth; h = canvas.clientHeight = window.innerHeight; const dpr = window.devicePixelRatio || 1; canvas.width = w*dpr; canvas.height = h*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); } function tick() { ctx.clearRect(0,0,w,h); for (const d of dots) { d.x += d.vx; d.y += d.vy; if (d.x < 0 || d.x > 1) d.vx *= -1; if (d.y < 0 || d.y > 1) d.vy *= -1; const x = d.x*w; const y = d.y*h; const g = ctx.createRadialGradient(x,y,0,x,y,d.r*8); g.addColorStop(0,"rgba(122,109,255,.35)"); g.addColorStop(1,"rgba(0,216,194,0)"); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x,y,d.r*8,0,Math.PI*2); ctx.fill(); } requestAnimationFrame(tick); } resize(); window.addEventListener("resize", resize); requestAnimationFrame(tick); }
     $("resetBtn").addEventListener("click", resetScenario); $("stepBtn").addEventListener("click", submitAction); $("suggestBtn").addEventListener("click", suggestAction); $("clearBtn").addEventListener("click", clearForm); modeSelectEl.addEventListener("change", persistPrefs); boundaryPresetEl.addEventListener("change", () => { safetyBoundaryEl.value = boundaryPresetEl.value; persistPrefs(); }); window.addEventListener("resize", drawSparkline); window.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "enter") submitAction(); });
-    loadPrefs(); bootParticles(); checkHealth(); setInterval(checkHealth, 10000); drawSparkline(); updateKpis(); resetScenario();
+    loadPrefs(); bootParticles(); checkHealth(); setInterval(checkHealth, 10000); drawSparkline(); updateKpis(); syncActionControls(); resetScenario();
   </script>
 </body>
 </html>"""
