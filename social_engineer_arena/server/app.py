@@ -23,6 +23,11 @@ def attach_showcase_routes(app: FastAPI) -> None:
         # Use request-aware URL generation so it works on hf.space and proxied huggingface.co routes.
         return RedirectResponse(url=str(request.url_for("arena_showcase")))
 
+    @app.get("/web")
+    def web_redirect(request: Request) -> RedirectResponse:
+        # Keep OpenEnv web entrypoint path but show the custom showcase UI.
+        return RedirectResponse(url=str(request.url_for("arena_showcase")))
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
