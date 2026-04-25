@@ -32,10 +32,26 @@ OUTPUT_DIR = os.getenv("OUTPUT_DIR", "outputs/social_engineer_arena_sft")
 DATA_MULTIPLIER = int(os.getenv("DATA_MULTIPLIER", "40"))
 SEED = int(os.getenv("SEED", "42"))
 DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
+SCENARIOS_PATH = os.getenv("SCENARIOS_PATH", "").strip()
 
 
 def make_env_with_split(split: str) -> SocialEngineerArenaEnvironment:
     """Create environment with split support across old/new package versions."""
+    if SCENARIOS_PATH:
+        scenario_path = Path(SCENARIOS_PATH)
+        if not scenario_path.exists():
+            raise FileNotFoundError(f"SCENARIOS_PATH not found: {scenario_path}")
+        try:
+            return SocialEngineerArenaEnvironment(scenarios_path=scenario_path, split=split)
+        except TypeError:
+            all_scenarios: list[dict] = json.loads(scenario_path.read_text(encoding="utf-8"))
+            filtered = [s for s in all_scenarios if s.get("split", "train") == split]
+            if not filtered:
+                filtered = all_scenarios
+            tmp_dir = Path(tempfile.gettempdir())
+            tmp_path = tmp_dir / f"social_engineer_arena_{split}_scenarios.json"
+            tmp_path.write_text(json.dumps(filtered, indent=2), encoding="utf-8")
+            return SocialEngineerArenaEnvironment(scenarios_path=tmp_path)
     try:
         return SocialEngineerArenaEnvironment(split=split)
     except TypeError:
@@ -216,6 +232,7 @@ def main() -> None:
         summary = {
             "model_name": MODEL_NAME,
             "output_repo": OUTPUT_REPO,
+            "scenarios_path": SCENARIOS_PATH or "default",
             "data_multiplier": DATA_MULTIPLIER,
             "seed": SEED,
             "train_rows": len(train_ds),
@@ -256,6 +273,7 @@ def main() -> None:
     summary = {
         "model_name": MODEL_NAME,
         "output_repo": OUTPUT_REPO,
+        "scenarios_path": SCENARIOS_PATH or "default",
         "data_multiplier": DATA_MULTIPLIER,
         "seed": SEED,
         "train_rows": len(train_ds),

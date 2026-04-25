@@ -78,6 +78,27 @@ Scenarios are split into:
 
 Stored in `social_engineer_arena/data/scenarios.json`.
 
+### Public data sources used for large-scale scenario generation
+
+When scaling beyond the handcrafted seed scenarios, this project uses public phishing/safe communication datasets:
+
+- Hugging Face: `cybersectony/PhishingEmailDetectionv2.0`  
+  <https://huggingface.co/datasets/cybersectony/PhishingEmailDetectionv2.0>
+- Kaggle: The Biggest Spam Ham Phish Email Dataset (250000+)  
+  <https://www.kaggle.com/datasets/akshatsharma2/the-biggest-spam-ham-phish-email-dataset-300000>
+
+Large-scenario builder script:
+
+```bash
+python scripts/build_large_scenarios.py --output social_engineer_arena/data/scenarios.large.json
+```
+
+Optional: include local Kaggle CSV files (downloaded into `data/raw/kaggle`):
+
+```bash
+python scripts/build_large_scenarios.py --kaggle-dir data/raw/kaggle --limit-hf 5000 --limit-kaggle 3000
+```
+
 ## Run locally
 
 ```bash
@@ -137,6 +158,12 @@ Notebook:
 Use it to connect TRL/Unsloth GRPO training to live environment reward:
 
 - `reset -> model output -> parse -> step -> reward`.
+
+For SFT jobs with larger generated scenarios, set `SCENARIOS_PATH`:
+
+```bash
+SCENARIOS_PATH=social_engineer_arena/data/scenarios.large.json python scripts/train_hf_job_sft.py
+```
 
 ## Hugging Face Space deployment
 
