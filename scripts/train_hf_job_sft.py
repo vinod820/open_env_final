@@ -17,6 +17,7 @@ import os
 import tempfile
 import random
 from pathlib import Path
+from urllib.request import urlretrieve
 
 from datasets import Dataset
 from trl import SFTConfig, SFTTrainer
@@ -33,14 +34,33 @@ DATA_MULTIPLIER = int(os.getenv("DATA_MULTIPLIER", "40"))
 SEED = int(os.getenv("SEED", "42"))
 DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
 SCENARIOS_PATH = os.getenv("SCENARIOS_PATH", "").strip()
+SCENARIOS_URL = os.getenv(
+    "SCENARIOS_URL",
+    "https://raw.githubusercontent.com/vinod820/open_env_final/main/social_engineer_arena/data/scenarios.large.json",
+).strip()
+
+
+def resolve_scenarios_path() -> Path | None:
+    if not SCENARIOS_PATH:
+        return None
+    scenario_path = Path(SCENARIOS_PATH)
+    if scenario_path.exists():
+        return scenario_path
+    if not SCENARIOS_URL:
+        raise FileNotFoundError(f"SCENARIOS_PATH not found: {scenario_path}")
+    tmp_dir = Path(tempfile.gettempdir())
+    tmp_path = tmp_dir / "social_engineer_arena_scenarios.large.json"
+    print(f"SCENARIOS_PATH not found locally. Downloading fallback from: {SCENARIOS_URL}")
+    urlretrieve(SCENARIOS_URL, tmp_path)
+    return tmp_path
 
 
 def make_env_with_split(split: str) -> SocialEngineerArenaEnvironment:
     """Create environment with split support across old/new package versions."""
     if SCENARIOS_PATH:
-        scenario_path = Path(SCENARIOS_PATH)
-        if not scenario_path.exists():
-            raise FileNotFoundError(f"SCENARIOS_PATH not found: {scenario_path}")
+        scenario_path = resolve_scenarios_path()
+        if scenario_path is None:
+            raise FileNotFoundError("Unable to resolve scenarios path.")
         try:
             return SocialEngineerArenaEnvironment(scenarios_path=scenario_path, split=split)
         except TypeError:
