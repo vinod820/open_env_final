@@ -54,6 +54,12 @@ class ArenaObservation(BaseModel):
     organization: str
     thread_context: str
     incoming_message: str
+    thread_history: list[str] = Field(default_factory=list)
+    user_profile: str = ""
+    policy_excerpt: str = ""
+    conflicting_context: str = ""
+    turn_index: int = 0
+    total_turns: int = 1
     task: str
     allowed_verdicts: list[Verdict]
     rubric: dict[str, Any]
@@ -68,6 +74,11 @@ class ArenaState(BaseModel):
     scenario_index: int = 0
     role: Role = "defender"
     scenario_id: str = ""
+    turn_index: int = 0
+    total_turns: int = 1
+    cumulative_turn_reward: float = 0.0
+    turn_rewards: list[float] = Field(default_factory=list)
+    verdict_history: list[Verdict] = Field(default_factory=list)
     done: bool = False
     last_reward: float | None = None
     reward_breakdown: RewardBreakdown | None = None

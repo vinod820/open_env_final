@@ -58,14 +58,28 @@ def rubric_aware_policy(obs) -> ArenaAction:
     )
 
 
-def run_policy(name: str, policy) -> dict:
-    env = SocialEngineerArenaEnvironment()
+def run_policy(name: str, policy, split: str) -> dict:
+    env = SocialEngineerArenaEnvironment(split=split)
     rewards: list[float] = []
     rows: list[dict] = []
     for _ in range(len(env.scenarios)):
         obs = env.reset()
-        action = policy(obs)
-        next_obs, reward, done = env.step(action)
+        done = False
+        reward = 0.0
+        turn_trace: list[dict] = []
+        while not done:
+            action = policy(obs)
+            next_obs, reward, done = env.step(action)
+            turn_trace.append(
+                {
+                    "turn_index": obs.turn_index,
+                    "verdict": action.verdict,
+                    "cues_found": action.cues_found,
+                    "response_preview": action.response[:120],
+                    "step_reward": reward,
+                }
+            )
+            obs = next_obs
         rewards.append(reward)
         rows.append(
             {
@@ -73,14 +87,40 @@ def run_policy(name: str, policy) -> dict:
                 "role": obs.role,
                 "reward": reward,
                 "done": done,
+                "turns": turn_trace,
                 "breakdown": next_obs.reward_breakdown.model_dump() if next_obs.reward_breakdown else {},
             }
         )
-    return {"policy": name, "mean_reward": round(sum(rewards) / len(rewards), 4), "episodes": rows}
+    return {
+        "policy": name,
+        "split": split,
+        "mean_reward": round(sum(rewards) / len(rewards), 4),
+        "episodes": rows,
+    }
+
+
+def compare_results(weak: dict, strong: dict) -> dict:
+    delta = round(strong["mean_reward"] - weak["mean_reward"], 4)
+    return {
+        "split": weak["split"],
+        "weak_mean_reward": weak["mean_reward"],
+        "rubric_aware_mean_reward": strong["mean_reward"],
+        "delta_reward": delta,
+    }
 
 
 def main() -> None:
-    results = [run_policy("weak_baseline", weak_policy), run_policy("rubric_aware_baseline", rubric_aware_policy)]
+    train_weak = run_policy("weak_baseline", weak_policy, split="train")
+    train_rubric = run_policy("rubric_aware_baseline", rubric_aware_policy, split="train")
+    test_weak = run_policy("weak_baseline", weak_policy, split="test")
+    test_rubric = run_policy("rubric_aware_baseline", rubric_aware_policy, split="test")
+    results = {
+        "runs": [train_weak, train_rubric, test_weak, test_rubric],
+        "delta_metrics": [
+            compare_results(train_weak, train_rubric),
+            compare_results(test_weak, test_rubric),
+        ],
+    }
     out_dir = PROJECT_ROOT / "outputs" / "evals"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "baseline_results.json").write_text(json.dumps(results, indent=2), encoding="utf-8")

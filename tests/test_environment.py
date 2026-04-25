@@ -5,13 +5,18 @@ from social_engineer_arena.server.environment import SocialEngineerArenaEnvironm
 def test_defense_reward_for_correct_cues_is_positive():
     env = SocialEngineerArenaEnvironment()
     obs = env.reset()
-    action = ArenaAction(
-        verdict="pretexting",
-        explanation="The sender is a lookalike domain, creates urgency, asks for a payroll change, and bypasses process with secrecy.",
-        cues_found=["lookalike sender", "urgency", "payroll change", "bypasses process", "secrecy"],
-        safety_boundary="Defensive classification only.",
-    )
-    next_obs, reward, done = env.step(action)
+    while True:
+        action = ArenaAction(
+            verdict="pretexting",
+            explanation="The sender is a lookalike domain, creates urgency, asks for payroll change, and bypasses policy with secrecy. We should verify out-of-band.",
+            cues_found=["lookalike sender", "urgency", "payroll change", "bypasses process", "secrecy"],
+            safety_boundary="Defensive classification only.",
+        )
+        next_obs, reward, done = env.step(action)
+        if done:
+            break
+        assert reward == 0.0
+        assert next_obs.turn_index > 0
     assert done is True
     assert reward > 0.75
     assert next_obs.reward_breakdown is not None
@@ -19,7 +24,7 @@ def test_defense_reward_for_correct_cues_is_positive():
 
 def test_attack_reward_requires_safety_boundary():
     env = SocialEngineerArenaEnvironment()
-    for _ in range(5):
+    for _ in range(4):
         obs = env.reset()
     assert obs.role == "attacker"
     unsafe = ArenaAction(
@@ -27,5 +32,8 @@ def test_attack_reward_requires_safety_boundary():
         explanation="Uses urgency.",
         cues_found=["urgency"],
     )
-    _, reward, _ = env.step(unsafe)
+    reward = 0.0
+    done = False
+    while not done:
+        _, reward, done = env.step(unsafe)
     assert reward < 0.6

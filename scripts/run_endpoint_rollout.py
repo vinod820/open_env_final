@@ -8,6 +8,7 @@ import re
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -41,6 +42,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--episodes", type=int, default=50, help="Number of episodes to run.")
     parser.add_argument("--outdir", type=Path, default=Path("outputs"), help="Output directory.")
+    parser.add_argument(
+        "--split",
+        type=str,
+        choices=["all", "train", "test"],
+        default="all",
+        help="Scenario split to evaluate.",
+    )
     parser.add_argument(
         "--endpoint-url",
         type=str,
@@ -207,33 +215,52 @@ def main() -> None:
     jsonl_archive_path = run_dir / "endpoint_rollout.jsonl"
     csv_archive_path = run_dir / "endpoint_rollout.csv"
 
-    env = SocialEngineerArenaEnvironment()
+    env = SocialEngineerArenaEnvironment(split=args.split)
     rows: list[dict] = []
 
     for i in range(args.episodes):
         obs = env.reset()
-        prompt = format_prompt(obs)
+        done = False
+        reward = 0.0
+        turn_trace: list[dict[str, Any]] = []
+        completion = ""
+        json_parse_ok = True
+        error = ""
+        next_obs = obs
+        while not done:
+            prompt = format_prompt(obs)
+            try:
+                completion = call_endpoint(
+                    endpoint_url=args.endpoint_url,
+                    hf_token=hf_token,
+                    model=args.model,
+                    prompt=prompt,
+                    max_tokens=args.max_tokens,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    timeout=args.timeout,
+                )
+                action, turn_parse_ok = parse_action(completion)
+                json_parse_ok = json_parse_ok and turn_parse_ok
+            except (HTTPError, URLError, TimeoutError, KeyError, json.JSONDecodeError) as exc:
+                action = ArenaAction(explanation=f"endpoint_error: {exc}")
+                completion = ""
+                json_parse_ok = False
+                error = str(exc)
 
-        try:
-            completion = call_endpoint(
-                endpoint_url=args.endpoint_url,
-                hf_token=hf_token,
-                model=args.model,
-                prompt=prompt,
-                max_tokens=args.max_tokens,
-                temperature=args.temperature,
-                top_p=args.top_p,
-                timeout=args.timeout,
+            next_obs, reward, done = env.step(action)
+            turn_trace.append(
+                {
+                    "turn_index": obs.turn_index,
+                    "turn_reward": reward,
+                    "done": done,
+                    "parse_ok": json_parse_ok,
+                    "verdict": action.verdict,
+                    "completion_preview": completion[:120].replace("\n", " "),
+                }
             )
-            action, json_parse_ok = parse_action(completion)
-            error = ""
-        except (HTTPError, URLError, TimeoutError, KeyError, json.JSONDecodeError) as exc:
-            action = ArenaAction(explanation=f"endpoint_error: {exc}")
-            completion = ""
-            json_parse_ok = False
-            error = str(exc)
+            obs = next_obs
 
-        next_obs, reward, done = env.step(action)
         breakdown = next_obs.reward_breakdown.model_dump() if next_obs.reward_breakdown else {}
 
         row = {
@@ -241,11 +268,13 @@ def main() -> None:
             "timestamp_utc": datetime.now(UTC).isoformat(),
             "role": obs.role,
             "scenario_id": obs.scenario_id,
+            "split": args.split,
             "reward": reward,
             "done": done,
             "verdict": action.verdict,
             "json_parse_ok": json_parse_ok,
             "error": error,
+            "turns": turn_trace,
             "completion_preview": completion[:240].replace("\n", " "),
             **{f"rb_{k}": v for k, v in breakdown.items() if k != "notes"},
             "rb_notes": " | ".join(breakdown.get("notes", [])),
@@ -280,6 +309,7 @@ def main() -> None:
     run_summary = {
         "run_id": run_id,
         "episodes": len(rows),
+        "split": args.split,
         "model": args.model,
         "endpoint_url": args.endpoint_url,
         "temperature": args.temperature,
