@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import random
 from pathlib import Path
 
 from datasets import Dataset
@@ -28,6 +29,9 @@ from social_engineer_arena.server.environment import SocialEngineerArenaEnvironm
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-0.5B-Instruct")
 OUTPUT_REPO = os.getenv("OUTPUT_REPO", "vinod2005/social-engineer-arena-sft")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "outputs/social_engineer_arena_sft")
+DATA_MULTIPLIER = int(os.getenv("DATA_MULTIPLIER", "40"))
+SEED = int(os.getenv("SEED", "42"))
+DRY_RUN = os.getenv("DRY_RUN", "0") == "1"
 
 
 def make_env_with_split(split: str) -> SocialEngineerArenaEnvironment:
@@ -65,6 +69,60 @@ verdict, explanation, cues_found, response, safety_boundary.
 """
 
 
+PROMPT_SUFFIXES = [
+    "Be concise but include concrete evidence.",
+    "Prefer policy-grounded reasoning over generic language.",
+    "Do not include markdown; JSON only.",
+    "Preserve consistency with earlier turns.",
+    "Reference both user profile and policy excerpt when relevant.",
+]
+
+
+EXPLANATION_PREFIXES = [
+    "Evidence-based decision:",
+    "Security rationale:",
+    "Policy-first analysis:",
+    "Risk-focused explanation:",
+]
+
+
+ATTACK_STYLE_SNIPPETS = [
+    "Use a polite but urgent tone.",
+    "Use authority framing without naming real systems.",
+    "Use emotional pressure while remaining clearly fictional.",
+    "Escalate urgency and request an exception path safely.",
+]
+
+
+def render_prompt_variant(base_prompt: str, variant_idx: int) -> str:
+    suffix = PROMPT_SUFFIXES[variant_idx % len(PROMPT_SUFFIXES)]
+    return f"{base_prompt}\nAdditional guidance: {suffix}"
+
+
+def render_action_variant(action: ArenaAction, role: str, target_cues: list[str], variant_idx: int) -> ArenaAction:
+    prefix = EXPLANATION_PREFIXES[variant_idx % len(EXPLANATION_PREFIXES)]
+    explanation = f"{prefix} {action.explanation}"
+    if role == "attacker":
+        style = ATTACK_STYLE_SNIPPETS[variant_idx % len(ATTACK_STYLE_SNIPPETS)]
+        response = f"{action.response} {style}"
+        cues = (target_cues or action.cues_found)[: max(2, min(5, len(target_cues) or 3))]
+        return ArenaAction(
+            verdict=action.verdict,
+            explanation=explanation,
+            cues_found=cues,
+            response=response,
+            safety_boundary=action.safety_boundary,
+        )
+    cues = (target_cues or action.cues_found)[: max(2, min(5, len(target_cues) or 3))]
+    return ArenaAction(
+        verdict=action.verdict,
+        explanation=explanation,
+        cues_found=cues,
+        response=action.response,
+        safety_boundary=action.safety_boundary,
+    )
+
+
 def target_action_for_turn(obs, scenario_turn: dict, role: str) -> ArenaAction:
     if role == "attacker":
         return ArenaAction(
@@ -91,18 +149,25 @@ def target_action_for_turn(obs, scenario_turn: dict, role: str) -> ArenaAction:
 
 
 def build_dataset(split: str) -> Dataset:
+    random.seed(SEED)
     env = make_env_with_split(split)
     rows = []
+    per_turn_multiplier = max(1, DATA_MULTIPLIER)
     for scenario in env.scenarios:
         turns = scenario.get("turns", [])
         for turn in turns:
             obs = env.reset()
-            target = target_action_for_turn(obs, turn, scenario["role"])
-            rows.append(
-                {
-                    "text": format_prompt(obs) + "\n" + target.model_dump_json(indent=2),
-                }
-            )
+            base_prompt = format_prompt(obs)
+            base_target = target_action_for_turn(obs, turn, scenario["role"])
+            for i in range(per_turn_multiplier):
+                prompt_variant = render_prompt_variant(base_prompt, i)
+                target_variant = render_action_variant(
+                    base_target,
+                    role=scenario["role"],
+                    target_cues=turn.get("target_cues", []),
+                    variant_idx=i,
+                )
+                rows.append({"text": prompt_variant + "\n" + target_variant.model_dump_json(indent=2)})
     return Dataset.from_list(rows)
 
 
@@ -147,6 +212,19 @@ def main() -> None:
     train_ds = build_dataset("train")
     test_ds = build_dataset("test")
 
+    if DRY_RUN:
+        summary = {
+            "model_name": MODEL_NAME,
+            "output_repo": OUTPUT_REPO,
+            "data_multiplier": DATA_MULTIPLIER,
+            "seed": SEED,
+            "train_rows": len(train_ds),
+            "test_rows": len(test_ds),
+            "dry_run": True,
+        }
+        print(json.dumps(summary, indent=2))
+        return
+
     trainer = SFTTrainer(
         model=MODEL_NAME,
         train_dataset=train_ds,
@@ -178,6 +256,8 @@ def main() -> None:
     summary = {
         "model_name": MODEL_NAME,
         "output_repo": OUTPUT_REPO,
+        "data_multiplier": DATA_MULTIPLIER,
+        "seed": SEED,
         "train_rows": len(train_ds),
         "test_rows": len(test_ds),
         "train_reward_proxy": round(train_reward, 4),
