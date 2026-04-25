@@ -5,3 +5,4 @@ outputs/
 .pytest_cache/
 .ruff_cache/
 wandb/
+*.egg-info/
