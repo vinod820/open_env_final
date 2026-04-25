@@ -2,9 +2,8 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from fastapi.responses import RedirectResponse
 try:
     from openenv.core.env_server import create_web_interface_app
 except ImportError:
@@ -22,18 +21,46 @@ def attach_showcase_routes(app: FastAPI) -> None:
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
+    def reset_handler() -> ArenaObservation:
+        return env.reset()
+
+    def step_handler(action: ArenaAction) -> dict:
+        try:
+            observation, reward, done = env.step(action)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return {
+            "observation": observation,
+            "reward": reward,
+            "done": done,
+        }
+
+    def state_handler() -> ArenaState:
+        return env.state
+
+    @app.post("/reset")
+    def reset() -> ArenaObservation:
+        return reset_handler()
+
+    @app.post("/step")
+    def step(action: ArenaAction) -> dict:
+        return step_handler(action)
+
+    @app.get("/state")
+    def state() -> ArenaState:
+        return state_handler()
+
     @app.post("/api/reset")
     def api_reset() -> ArenaObservation:
-        return env.reset()
+        return reset_handler()
 
     @app.post("/api/step")
     def api_step(action: ArenaAction) -> dict:
-        observation, reward, done = env.step(action)
-        return {"observation": observation, "reward": reward, "done": done}
+        return step_handler(action)
 
     @app.get("/api/state")
     def api_state() -> ArenaState:
-        return env.state
+        return state_handler()
 
     @app.get("/arena", response_class=HTMLResponse)
     def arena_showcase() -> str:

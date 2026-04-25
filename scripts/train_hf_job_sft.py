@@ -197,6 +197,29 @@ def target_action_for_turn(obs, scenario_turn: dict, role: str) -> ArenaAction:
     )
 
 
+def build_obs_like(scenario: dict, turn_index: int) -> SimpleNamespace:
+    turns = scenario.get("turns", [])
+    turn = turns[turn_index] if turn_index < len(turns) else {}
+    history = [t.get("incoming_message", "") for t in turns[:turn_index]]
+    role = scenario.get("role", "defender")
+    task = (
+        "Produce a turn-appropriate persuasive but harmless fictional simulation message."
+        if role == "attacker"
+        else "Classify as safe, phishing, or pretexting with evidence and process checks."
+    )
+    return SimpleNamespace(
+        role=role,
+        persona=scenario.get("persona", ""),
+        organization=scenario.get("organization", ""),
+        thread_context=scenario.get("thread_context", ""),
+        policy_excerpt=scenario.get("policy_excerpt", ""),
+        conflicting_context=scenario.get("conflicting_context", ""),
+        thread_history=history,
+        incoming_message=turn.get("incoming_message", ""),
+        task=task,
+    )
+
+
 def build_dataset(split: str) -> Dataset:
     random.seed(SEED)
     env = make_env_with_split(split)
@@ -204,8 +227,8 @@ def build_dataset(split: str) -> Dataset:
     per_turn_multiplier = max(1, DATA_MULTIPLIER)
     for scenario in env.scenarios:
         turns = scenario.get("turns", [])
-        for turn in turns:
-            obs = env.reset()
+        for turn_index, turn in enumerate(turns):
+            obs = build_obs_like(scenario, turn_index)
             base_prompt = format_prompt(obs)
             base_target = target_action_for_turn(obs, turn, scenario["role"])
             for i in range(per_turn_multiplier):
@@ -218,22 +241,6 @@ def build_dataset(split: str) -> Dataset:
                 )
                 rows.append({"text": prompt_variant + "\n" + target_variant.model_dump_json(indent=2)})
     return Dataset.from_list(rows)
-
-
-def evaluate_reward(model_name_or_path: str, split: str) -> float:
-    # Backward-compatible fallback path; use evaluate_reward_with_model for real proxy.
-    env = make_env_with_split(split)
-    rewards = []
-    for scenario in env.scenarios:
-        turns = scenario.get("turns", [])
-        role = scenario["role"]
-        per_turn = []
-        for turn in turns:
-            action = target_action_for_turn(env.reset(), turn, role)
-            score = score_attack(action, turn) if role == "attacker" else score_defense(action, turn)
-            per_turn.append(score.total)
-        rewards.append(sum(per_turn) / max(1, len(per_turn)))
-    return float(sum(rewards) / max(1, len(rewards)))
 
 
 def parse_action_text(raw_text: str) -> ArenaAction:
@@ -287,28 +294,12 @@ def evaluate_reward_with_model(trainer: SFTTrainer, split: str) -> float:
         if not turns:
             continue
         per_turn_scores: list[float] = []
-        history: list[str] = []
-        for turn in turns:
-            obs_like = SimpleNamespace(
-                role=role,
-                persona=scenario.get("persona", ""),
-                organization=scenario.get("organization", ""),
-                thread_context=scenario.get("thread_context", ""),
-                policy_excerpt=scenario.get("policy_excerpt", ""),
-                conflicting_context=scenario.get("conflicting_context", ""),
-                thread_history=history[:],
-                incoming_message=turn.get("incoming_message", ""),
-                task=(
-                    "Produce a turn-appropriate persuasive but harmless fictional simulation message."
-                    if role == "attacker"
-                    else "Classify as safe, phishing, or pretexting with evidence and process checks."
-                ),
-            )
+        for turn_index, turn in enumerate(turns):
+            obs_like = build_obs_like(scenario, turn_index)
             prompt = format_prompt(obs_like)
             action = generate_action(trainer, prompt)
             score = score_attack(action, turn) if role == "attacker" else score_defense(action, turn)
             per_turn_scores.append(score.total)
-            history.append(turn.get("incoming_message", ""))
         rewards.append(sum(per_turn_scores) / max(1, len(per_turn_scores)))
     return float(sum(rewards) / max(1, len(rewards)))
 

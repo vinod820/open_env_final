@@ -184,6 +184,18 @@ def split_pairs(pairs: list[tuple[str, str]], test_ratio: float, seed: int) -> t
     return train, test
 
 
+def dedupe_pairs(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    seen: set[str] = set()
+    deduped: list[tuple[str, str]] = []
+    for message, label in pairs:
+        key = re.sub(r"\s+", " ", message).strip().lower()
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        deduped.append((message, label))
+    return deduped
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build larger SocialEngineerArena scenarios from public datasets.")
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Output scenarios JSON path.")
@@ -201,7 +213,7 @@ def main() -> None:
 
     hf_rows = rows_from_hf(limit=args.limit_hf, seed=args.seed)
     kaggle_rows = rows_from_kaggle_dir(args.kaggle_dir, limit=args.limit_kaggle)
-    all_rows = hf_rows + kaggle_rows
+    all_rows = dedupe_pairs(hf_rows + kaggle_rows)
     if not all_rows:
         raise RuntimeError("No rows found. Check internet access for HF dataset or local Kaggle CSV directory.")
 
@@ -224,6 +236,7 @@ def main() -> None:
         "test_scenarios": len(test_pairs),
         "hf_rows_used": len(hf_rows),
         "kaggle_rows_used": len(kaggle_rows),
+        "deduped_rows_used": len(all_rows),
     }
     print(json.dumps(summary, indent=2))
 

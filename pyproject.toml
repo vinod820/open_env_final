@@ -27,3 +27,6 @@ include = ["social_engineer_arena*"]
 
 [tool.setuptools.package-data]
 social_engineer_arena = ["data/*.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

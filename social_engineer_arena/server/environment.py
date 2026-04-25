@@ -61,6 +61,8 @@ class SocialEngineerArenaEnvironment(Environment[ArenaAction, ArenaObservation, 
         return self._observation(scenario)
 
     def step(self, action: ArenaAction) -> tuple[ArenaObservation, float, bool]:
+        if not self._state.episode_id:
+            raise RuntimeError("Call reset() before step().")
         scenario = self._scenario_by_id(self._state.scenario_id)
         if self._state.done:
             observation = self._observation(scenario)
