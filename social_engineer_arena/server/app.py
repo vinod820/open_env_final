@@ -4,6 +4,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+from fastapi.responses import RedirectResponse
 try:
     from openenv.core.env_server import create_web_interface_app
 except ImportError:
@@ -17,6 +18,11 @@ env = SocialEngineerArenaEnvironment()
 
 
 def attach_showcase_routes(app: FastAPI) -> None:
+    @app.get("/")
+    def root_redirect() -> RedirectResponse:
+        # Make the showcase UI the default Space landing page.
+        return RedirectResponse(url="/arena")
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}

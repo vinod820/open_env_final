@@ -2,7 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 ENV PYTHONUNBUFFERED=1
-ENV ENABLE_WEB_INTERFACE=true
+ENV ENABLE_WEB_INTERFACE=false
 ENV PORT=8000
 
 COPY pyproject.toml README.md openenv.yaml ./
