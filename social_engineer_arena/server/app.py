@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from typing import Any
 from urllib import error, request
 
 from fastapi import FastAPI, HTTPException
@@ -38,6 +39,41 @@ verdict, explanation, cues_found, response, safety_boundary.
 """
 
 
+def _extract_generated_text(body: Any) -> str:
+    """Normalize HF serverless / TGI / Inference Endpoint response shapes."""
+    if body is None:
+        return ""
+    if isinstance(body, str):
+        return body
+    if isinstance(body, dict):
+        if "generated_text" in body and isinstance(body["generated_text"], str):
+            return body["generated_text"]
+        if "text" in body and isinstance(body["text"], str):
+            return body["text"]
+        choices = body.get("choices")
+        if isinstance(choices, list) and choices:
+            first = choices[0]
+            if isinstance(first, dict):
+                msg = first.get("message") or first.get("delta") or {}
+                if isinstance(msg, dict) and isinstance(msg.get("content"), str):
+                    return msg["content"]
+        data = body.get("data")
+        if isinstance(data, list) and data:
+            return _extract_generated_text(data[0])
+    if isinstance(body, list):
+        if not body:
+            return ""
+        first = body[0]
+        if isinstance(first, str):
+            return first
+        if isinstance(first, dict) and "generated_text" in first:
+            gt = first.get("generated_text")
+            return gt if isinstance(gt, str) else ""
+        if isinstance(first, list) and first:
+            return _extract_generated_text(first[0])
+    return ""
+
+
 def _parse_action_json(text: str) -> ArenaAction:
     raw = (text or "").strip()
     if not raw:
@@ -57,6 +93,7 @@ def _generate_suggestion(obs: ArenaObservation) -> tuple[ArenaAction, str]:
     endpoint_url = os.getenv("HF_ENDPOINT_URL", "").strip()
     hf_token = os.getenv("HF_TOKEN", "").strip()
     max_new_tokens = int(os.getenv("SUGGEST_MAX_NEW_TOKENS", "180"))
+    suggest_timeout = int(os.getenv("SUGGEST_TIMEOUT_SEC", "120"))
     if not model_id and not endpoint_url:
         raise RuntimeError(
             "No suggestion model configured. Set SUGGEST_MODEL_ID or HF_ENDPOINT_URL."
@@ -73,17 +110,21 @@ def _generate_suggestion(obs: ArenaObservation) -> tuple[ArenaAction, str]:
             "return_full_text": False,
         },
     }
+    headers = {
+        "Authorization": f"Bearer {hf_token}",
+        "Content-Type": "application/json",
+    }
+    if os.getenv("SUGGEST_WAIT_FOR_MODEL", "").strip().lower() in {"1", "true", "yes"}:
+        headers["x-wait-for-model"] = "true"
+
     req = request.Request(
         target_url,
         data=json.dumps(payload).encode("utf-8"),
-        headers={
-            "Authorization": f"Bearer {hf_token}",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
         method="POST",
     )
     try:
-        with request.urlopen(req, timeout=45) as resp:
+        with request.urlopen(req, timeout=suggest_timeout) as resp:
             body = json.loads(resp.read().decode("utf-8"))
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
@@ -91,14 +132,15 @@ def _generate_suggestion(obs: ArenaObservation) -> tuple[ArenaAction, str]:
     except Exception as exc:
         raise RuntimeError(f"Suggestion request failed: {exc}") from exc
 
-    generated = ""
-    if isinstance(body, list) and body and isinstance(body[0], dict):
-        generated = body[0].get("generated_text", "")
-    elif isinstance(body, dict):
-        generated = body.get("generated_text", "")
+    generated = _extract_generated_text(body)
+    if not generated.strip():
+        raise RuntimeError(
+            "Model returned no text. Raw response (truncated): "
+            + json.dumps(body, default=str)[:800]
+        )
     action = _parse_action_json(generated)
     source = endpoint_url or model_id
-    return action, source
+    return action, source, generated
 
 
 def attach_showcase_routes(app: FastAPI) -> None:
@@ -130,8 +172,13 @@ def attach_showcase_routes(app: FastAPI) -> None:
             raise RuntimeError("Episode is complete. Call reset() to start a new episode.")
         scenario = env._scenario_by_id(env.state.scenario_id)
         obs = env._observation(scenario)
-        action, source = _generate_suggestion(obs)
-        return {"action": action, "source": source}
+        action, source, raw = _generate_suggestion(obs)
+        preview = raw.strip()[:1200]
+        return {
+            "action": action,
+            "source": source,
+            "raw_preview": preview,
+        }
 
     @app.post("/reset")
     def reset() -> ArenaObservation:
@@ -286,7 +333,7 @@ def attach_showcase_routes(app: FastAPI) -> None:
     function drawSparkline() { const canvas = $("spark"); const ctx = canvas.getContext("2d"); const ratio = window.devicePixelRatio || 1; canvas.width = canvas.clientWidth * ratio; canvas.height = canvas.clientHeight * ratio; ctx.setTransform(ratio,0,0,ratio,0,0); const w = canvas.clientWidth; const h = canvas.clientHeight; ctx.clearRect(0,0,w,h); if (!rewardHistory.length) return; ctx.strokeStyle = "rgba(255,255,255,.18)"; ctx.lineWidth = 1; for (const y of [0.25,0.5,0.75]) { ctx.beginPath(); ctx.moveTo(0,h*y); ctx.lineTo(w,h*y); ctx.stroke(); } const step = w / Math.max(1, rewardHistory.length - 1); const grad = ctx.createLinearGradient(0,0,w,0); grad.addColorStop(0,"#00d8c2"); grad.addColorStop(1,"#7c6dff"); ctx.strokeStyle = grad; ctx.lineWidth = 2.4; ctx.beginPath(); rewardHistory.forEach((r,i) => { const x = i*step; const y = h - Math.max(0,Math.min(1,r))*h; if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }); ctx.stroke(); }
     function clearErrors() { $("errorSummary").classList.remove("show"); $("errorSummary").textContent = ""; for (const id of ["verdictErr","boundaryErr","explanationErr","cuesErr"]) $(id).textContent = ""; for (const id of ["verdict","safetyBoundary","explanation","cuesFound"]) $(id).classList.remove("error"); }
     function validateForm() { clearErrors(); const errors = []; const explanation = explanationEl.value.trim(); const boundary = safetyBoundaryEl.value.trim(); const cues = cuesFoundEl.value.split(",").map((x)=>x.trim()).filter(Boolean); if (!verdictEl.value) { errors.push("Verdict is required."); $("verdictErr").textContent = "Choose a verdict."; verdictEl.classList.add("error"); } if (explanation.length < 16) { errors.push("Explanation should be at least 16 characters."); $("explanationErr").textContent = "Add evidence-based reasoning."; explanationEl.classList.add("error"); } if (!boundary) { errors.push("Safety boundary cannot be empty."); $("boundaryErr").textContent = "Set a clear safety boundary."; safetyBoundaryEl.classList.add("error"); } if (cues.length === 0) { errors.push("Add at least one cue."); $("cuesErr").textContent = "Add at least one cue."; cuesFoundEl.classList.add("error"); } if (errors.length) { const summary = $("errorSummary"); summary.textContent = "Please fix: " + errors.join(" "); summary.classList.add("show"); return false; } return true; }
-    async function suggestAction() { if (!observation) { toast("Start episode first"); return; } if (observation.done) { toast("Episode complete. Start a new episode."); syncActionControls(); return; } setBusy(true); try { const res = await fetch("suggest", { method:"POST" }); const out = await res.json(); if (!res.ok) throw new Error(out.detail || "Suggest failed"); const action = out.action || {}; verdictEl.value = action.verdict || "unknown"; explanationEl.value = action.explanation || ""; cuesFoundEl.value = Array.isArray(action.cues_found) ? action.cues_found.join(", ") : ""; responseEl.value = action.response || ""; safetyBoundaryEl.value = action.safety_boundary || boundaryPresetEl.value.trim() || "Defensive analysis only."; toast("Suggestion loaded from model"); } catch (e) { resultBoxEl.textContent = "Suggest error: " + e.message; toast("Suggestion unavailable"); } finally { setBusy(false); syncActionControls(); } }
+    async function suggestAction() { if (!observation) { toast("Start episode first"); return; } if (observation.done) { toast("Episode complete. Start a new episode."); syncActionControls(); return; } setBusy(true); try { const res = await fetch("suggest", { method:"POST" }); const out = await res.json(); if (!res.ok) throw new Error((typeof out.detail === "string" ? out.detail : JSON.stringify(out.detail)) || "Suggest failed"); const action = out.action || {}; verdictEl.value = action.verdict || "unknown"; explanationEl.value = action.explanation || ""; cuesFoundEl.value = Array.isArray(action.cues_found) ? action.cues_found.join(", ") : ""; responseEl.value = action.response || ""; safetyBoundaryEl.value = action.safety_boundary || boundaryPresetEl.value.trim() || "Defensive analysis only."; const src = out.source || "(unknown)"; const raw = out.raw_preview || ""; resultBoxEl.textContent = ["Suggestion source: " + src, "", "Parsed action (JSON):", JSON.stringify(action, null, 2), "", "Raw model output (preview):", raw || "(empty)"].join("\\n"); toast("Suggestion loaded from model"); } catch (e) { resultBoxEl.textContent = "Suggest error: " + e.message + "\\n\\nSet HF_ENDPOINT_URL + HF_TOKEN on the server (Space secrets), or run locally with the same env vars."; toast("Suggestion unavailable"); } finally { setBusy(false); syncActionControls(); } }
     function pushEvent(title, details, reward, done) { const item = { at:new Date().toLocaleTimeString(), title, details, reward, done }; actionLog.unshift(item); const host = $("timeline"); host.innerHTML = actionLog.slice(0,50).map((e)=>( '<div class="event"><div class="meta">' + e.at + " • " + e.title + (e.done ? " • episode complete" : "") + '</div><div>' + e.details.replace(/</g,"&lt;").replace(/>/g,"&gt;") + '</div><div class="meta">reward: ' + Number(e.reward || 0).toFixed(3) + '</div></div>' )).join(""); updateKpis(); }
     async function checkHealth() { try { const res = await fetch("health"); if (!res.ok) throw new Error("bad"); $("apiStatus").textContent = "online"; $("healthDot").style.background = "var(--ok)"; $("healthDot").style.boxShadow = "0 0 14px rgba(87,226,157,.7)"; } catch (_e) { $("apiStatus").textContent = "offline"; $("healthDot").style.background = "var(--bad)"; $("healthDot").style.boxShadow = "0 0 14px rgba(255,107,136,.6)"; } }
     async function resetScenario() { setBusy(true); clearErrors(); try { const res = await fetch("reset", { method:"POST" }); if (!res.ok) throw new Error("Reset failed"); observation = await res.json(); episodeCount += 1; $("rolePill").textContent = observation.role; $("scenarioPill").textContent = observation.scenario_id; $("episodePill").textContent = String(episodeCount); $("stepPill").textContent = String(observation.turn_index); $("incomingMessage").textContent = observation.incoming_message; $("contextBox").textContent = ["Channel: " + observation.channel, "Persona: " + observation.persona, "Organization: " + observation.organization, "Task: " + observation.task, "", "Policy:", observation.policy_excerpt || "(none)", "", "Thread Context:", observation.thread_context || "(none)"].join("\\n"); resultBoxEl.textContent = "Episode initialized. Prepare action and submit."; safetyBoundaryEl.value = boundaryPresetEl.value.trim() || "Defensive analysis only."; pushEvent("Episode started", "Scenario " + observation.scenario_id + " loaded.", 0, false); toast("Episode loaded"); } catch (e) { resultBoxEl.textContent = "Error: " + e.message; } finally { setBusy(false); syncActionControls(); } }
