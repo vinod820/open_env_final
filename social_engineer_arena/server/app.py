@@ -34,8 +34,14 @@ Thread History:
 Incoming Message: {obs.incoming_message}
 Task: {obs.task}
 
-Return ONLY one JSON object with keys:
+Return ONLY one JSON object and nothing else.
+First character must be "{{" and last character must be "}}".
+Required keys:
 verdict, explanation, cues_found, response, safety_boundary.
+Rules:
+- verdict must be one of: safe, phishing, pretexting, unknown
+- cues_found must be an array of short strings
+- no markdown, no prose outside JSON, no code fences
 """
 
 
@@ -88,7 +94,46 @@ def _parse_action_json(text: str) -> ArenaAction:
     return ArenaAction.model_validate_json(match.group(0))
 
 
-def _generate_suggestion(obs: ArenaObservation) -> tuple[ArenaAction, str]:
+def _looks_like_prompt_echo(text: str) -> bool:
+    lowered = text.lower()
+    markers = [
+        "return only one json object",
+        "do not include markdown",
+        "you are assisting in socialengineerarena",
+        "required keys",
+    ]
+    return any(marker in lowered for marker in markers)
+
+
+def _request_suggestion_once(
+    *,
+    target_url: str,
+    headers: dict[str, str],
+    prompt: str,
+    max_new_tokens: int,
+    suggest_timeout: int,
+) -> Any:
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": max_new_tokens,
+            "temperature": 0.0,
+            "do_sample": False,
+            "return_full_text": False,
+            "repetition_penalty": 1.05,
+        },
+    }
+    req = request.Request(
+        target_url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with request.urlopen(req, timeout=suggest_timeout) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _generate_suggestion(obs: ArenaObservation) -> tuple[ArenaAction, str, str]:
     model_id = os.getenv("SUGGEST_MODEL_ID", "").strip()
     endpoint_url = os.getenv("HF_ENDPOINT_URL", "").strip()
     hf_token = os.getenv("HF_TOKEN", "").strip()
@@ -102,14 +147,7 @@ def _generate_suggestion(obs: ArenaObservation) -> tuple[ArenaAction, str]:
         raise RuntimeError("HF_TOKEN is required for model-backed suggestion.")
 
     target_url = endpoint_url or f"https://api-inference.huggingface.co/models/{model_id}"
-    payload = {
-        "inputs": _suggest_prompt(obs),
-        "parameters": {
-            "max_new_tokens": max_new_tokens,
-            "temperature": 0.2,
-            "return_full_text": False,
-        },
-    }
+    prompt = _suggest_prompt(obs)
     headers = {
         "Authorization": f"Bearer {hf_token}",
         "Content-Type": "application/json",
@@ -117,15 +155,14 @@ def _generate_suggestion(obs: ArenaObservation) -> tuple[ArenaAction, str]:
     if os.getenv("SUGGEST_WAIT_FOR_MODEL", "").strip().lower() in {"1", "true", "yes"}:
         headers["x-wait-for-model"] = "true"
 
-    req = request.Request(
-        target_url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
-        method="POST",
-    )
     try:
-        with request.urlopen(req, timeout=suggest_timeout) as resp:
-            body = json.loads(resp.read().decode("utf-8"))
+        body = _request_suggestion_once(
+            target_url=target_url,
+            headers=headers,
+            prompt=prompt,
+            max_new_tokens=max_new_tokens,
+            suggest_timeout=suggest_timeout,
+        )
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore")
         raise RuntimeError(f"Suggestion request failed ({exc.code}): {detail}") from exc
@@ -138,6 +175,23 @@ def _generate_suggestion(obs: ArenaObservation) -> tuple[ArenaAction, str]:
             "Model returned no text. Raw response (truncated): "
             + json.dumps(body, default=str)[:800]
         )
+    # Retry once with an even stricter prompt if model echoed instructions.
+    if _looks_like_prompt_echo(generated):
+        strict_prompt = prompt + "\nOutput only compact JSON. Begin with '{' now."
+        try:
+            retry_body = _request_suggestion_once(
+                target_url=target_url,
+                headers=headers,
+                prompt=strict_prompt,
+                max_new_tokens=max_new_tokens,
+                suggest_timeout=suggest_timeout,
+            )
+            retry_generated = _extract_generated_text(retry_body)
+            if retry_generated.strip():
+                generated = retry_generated
+        except Exception:
+            pass
+
     action = _parse_action_json(generated)
     source = endpoint_url or model_id
     return action, source, generated
