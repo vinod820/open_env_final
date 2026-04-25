@@ -1,0 +1,22 @@
+name: social-engineer-arena
+display_name: SocialEngineerArena
+description: Red/blue-team social engineering environment for training LLMs to detect manipulation and craft safe fictional simulations.
+version: 0.1.0
+author: vinod
+license: MIT
+tags:
+  - openenv
+  - reinforcement-learning
+  - cybersecurity
+  - social-engineering
+  - llm-agents
+entrypoint: social_engineer_arena.server.app:app
+python_package: social_engineer_arena
+client_class: social_engineer_arena.client:SocialEngineerArenaEnv
+action_class: social_engineer_arena.models:ArenaAction
+observation_class: social_engineer_arena.models:ArenaObservation
+state_class: social_engineer_arena.models:ArenaState
+space:
+  sdk: docker
+  app_port: 8000
+  suggested_hardware: cpu-basic

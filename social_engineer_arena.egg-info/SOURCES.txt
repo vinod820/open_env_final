@@ -1,0 +1,17 @@
+README.md
+pyproject.toml
+social_engineer_arena/__init__.py
+social_engineer_arena/client.py
+social_engineer_arena/models.py
+social_engineer_arena/rubrics.py
+social_engineer_arena.egg-info/PKG-INFO
+social_engineer_arena.egg-info/SOURCES.txt
+social_engineer_arena.egg-info/dependency_links.txt
+social_engineer_arena.egg-info/entry_points.txt
+social_engineer_arena.egg-info/requires.txt
+social_engineer_arena.egg-info/top_level.txt
+social_engineer_arena/data/scenarios.json
+social_engineer_arena/server/__init__.py
+social_engineer_arena/server/app.py
+social_engineer_arena/server/environment.py
+tests/test_environment.py

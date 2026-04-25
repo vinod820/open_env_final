@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="900" height="500" viewBox="0 0 900 500" role="img" aria-label="Reward curve placeholder">
+  <rect width="900" height="500" fill="#fafaf8"/>
+  <g stroke="#dadee2" stroke-width="1">
+    <line x1="90" y1="52" x2="840" y2="52"/>
+    <line x1="90" y1="126" x2="840" y2="126"/>
+    <line x1="90" y1="199" x2="840" y2="199"/>
+    <line x1="90" y1="273" x2="840" y2="273"/>
+    <line x1="90" y1="346" x2="840" y2="346"/>
+    <line x1="90" y1="420" x2="840" y2="420"/>
+  </g>
+  <g stroke="#252b36" stroke-width="3">
+    <line x1="90" y1="52" x2="90" y2="420"/>
+    <line x1="90" y1="420" x2="840" y2="420"/>
+  </g>
+  <polyline fill="none" stroke="#bc534b" stroke-width="5" points="90,354 197,339 304,346 411,332 518,328 625,321 732,328 840,324"/>
+  <polyline fill="none" stroke="#278071" stroke-width="5" points="90,339 197,302 304,269 411,225 518,196 625,162 732,133 840,111"/>
+  <g font-family="Arial, sans-serif" fill="#252b36">
+    <text x="90" y="36" font-size="22" font-weight="700">SocialEngineerArena reward trend</text>
+    <text x="90" y="468" font-size="16">episode / training checkpoint</text>
+    <text x="14" y="250" font-size="16" transform="rotate(-90 14 250)">mean reward</text>
+    <text x="650" y="96" font-size="15" fill="#278071">rubric-aware / trained target</text>
+    <text x="650" y="314" font-size="15" fill="#bc534b">weak baseline</text>
+  </g>
+</svg>
