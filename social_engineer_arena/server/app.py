@@ -69,339 +69,121 @@ def attach_showcase_routes(app: FastAPI) -> None:
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>SocialEngineerArena - Live Demo</title>
+  <title>SocialEngineerArena</title>
   <style>
-    :root {
-      --bg0: #0a0a16;
-      --bg1: #15152f;
-      --accent: #7c5cff;
-      --accent2: #16e0bd;
-      --text: #f7f7ff;
-      --muted: #a8adc9;
-      --danger: #ff5f79;
-      --safe: #56e39f;
-      --warn: #ffcf5a;
-      --glass: rgba(255, 255, 255, 0.06);
-      --border: rgba(255, 255, 255, 0.15);
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      font-family: Inter, Segoe UI, system-ui, sans-serif;
-      color: var(--text);
-      background: radial-gradient(circle at 20% 20%, #1f1f45 0%, transparent 40%),
-                  radial-gradient(circle at 80% 0%, #113e48 0%, transparent 35%),
-                  linear-gradient(120deg, var(--bg0), var(--bg1));
-      min-height: 100vh;
-      overflow-x: hidden;
-    }
-    .bg-anim::before, .bg-anim::after {
-      content: "";
-      position: fixed;
-      width: 320px;
-      height: 320px;
-      border-radius: 50%;
-      filter: blur(64px);
-      z-index: -1;
-      animation: drift 12s ease-in-out infinite alternate;
-    }
-    .bg-anim::before { background: #6c4cff88; top: 10%; left: -60px; }
-    .bg-anim::after { background: #00e0c088; bottom: 2%; right: -80px; animation-delay: 1.5s; }
-    @keyframes drift { from { transform: translateY(-20px); } to { transform: translateY(40px); } }
-    .wrap { max-width: 1200px; margin: 24px auto; padding: 0 16px 32px; }
-    .hero {
-      display: grid;
-      grid-template-columns: 1.3fr .7fr;
-      gap: 16px;
-      margin-bottom: 16px;
-    }
-    .card {
-      background: var(--glass);
-      border: 1px solid var(--border);
-      backdrop-filter: blur(14px);
-      border-radius: 18px;
-      box-shadow: 0 10px 40px rgba(0,0,0,.28);
-      padding: 16px;
-    }
-    h1 { margin: 0 0 10px; font-size: 28px; letter-spacing: .3px; }
-    .subtitle { color: var(--muted); margin-bottom: 12px; }
-    .stats { display: flex; gap: 10px; flex-wrap: wrap; }
-    .pill {
-      background: rgba(255,255,255,.08);
-      border: 1px solid var(--border);
-      border-radius: 999px;
-      padding: 8px 12px;
-      font-size: 13px;
-    }
-    .layout {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-    }
-    .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; margin-bottom: 6px; }
-    .box {
-      background: rgba(0,0,0,.2);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 10px;
-      min-height: 110px;
-      white-space: pre-wrap;
-      line-height: 1.45;
-    }
-    textarea, select, input {
-      width: 100%;
-      border: 1px solid var(--border);
-      background: rgba(0,0,0,.25);
-      color: var(--text);
-      border-radius: 12px;
-      padding: 10px;
-      font: inherit;
-      outline: none;
-      transition: border-color .2s, transform .2s;
-    }
-    textarea:focus, select:focus, input:focus { border-color: #7f9bff; transform: translateY(-1px); }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px; }
-    .btns { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
-    button {
-      border: 0;
-      border-radius: 12px;
-      color: white;
-      cursor: pointer;
-      padding: 10px 14px;
-      font-weight: 600;
-      transition: transform .18s ease, box-shadow .2s ease, opacity .2s;
-    }
-    button:hover { transform: translateY(-2px) scale(1.01); }
-    button:disabled { opacity: .55; cursor: default; transform: none; }
-    .primary { background: linear-gradient(90deg, var(--accent), #9b4dff); box-shadow: 0 8px 24px rgba(124,92,255,.35); }
-    .secondary { background: linear-gradient(90deg, #0ea9a2, #0ac59f); box-shadow: 0 8px 24px rgba(22,224,189,.25); }
-    .ghost { background: rgba(255,255,255,.1); border: 1px solid var(--border); }
-    .reward {
-      font-size: 34px;
-      font-weight: 800;
-      letter-spacing: .4px;
-      margin: 6px 0;
-      transition: color .2s ease, text-shadow .2s ease;
-    }
-    .reward.good { color: var(--safe); text-shadow: 0 0 16px #56e39f66; }
-    .reward.mid { color: var(--warn); text-shadow: 0 0 16px #ffcf5a55; }
-    .reward.bad { color: var(--danger); text-shadow: 0 0 16px #ff5f7955; }
-    .small { font-size: 12px; color: var(--muted); }
-    .spark { height: 120px; width: 100%; }
-    .toast {
-      position: fixed;
-      right: 14px;
-      top: 14px;
-      background: rgba(30,30,50,.9);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 10px 12px;
-      opacity: 0;
-      transform: translateY(-10px);
-      transition: all .25s;
-    }
-    .toast.show { opacity: 1; transform: translateY(0); }
-    @media (max-width: 1000px) {
-      .hero, .layout { grid-template-columns: 1fr; }
-      .row { grid-template-columns: 1fr; }
-    }
+    :root { --bg0:#070a18; --bg1:#111636; --card:rgba(255,255,255,.08); --line:rgba(255,255,255,.16); --txt:#f4f7ff; --muted:#aab5d5; --accent:#7c6dff; --accent2:#00d8c2; --ok:#57e29d; --warn:#ffd166; --bad:#ff6b88; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:Inter,Segoe UI,system-ui,sans-serif; color:var(--txt); background:radial-gradient(1200px 700px at 12% -10%,#2e1f88 0%,transparent 50%),radial-gradient(900px 500px at 92% -15%,#004d5c 0%,transparent 50%),linear-gradient(135deg,var(--bg0),var(--bg1)); min-height:100vh; overflow-x:hidden; }
+    .ambient { position:fixed; inset:0; z-index:0; pointer-events:none; } #particles { width:100%; height:100%; opacity:.6; }
+    .wrap { position:relative; z-index:1; max-width:1320px; margin:18px auto; padding:0 14px 24px; }
+    .topbar { display:grid; grid-template-columns:1.2fr .8fr; gap:12px; margin-bottom:12px; } .panel { background:var(--card); border:1px solid var(--line); backdrop-filter:blur(14px); border-radius:16px; box-shadow:0 12px 32px rgba(6,10,30,.35); padding:14px; }
+    h1 { font-size:26px; letter-spacing:.3px; margin-bottom:8px; } .sub { color:var(--muted); margin-bottom:10px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; } .badge { background:rgba(255,255,255,.08); border:1px solid var(--line); border-radius:999px; padding:7px 11px; font-size:13px; }
+    .health-dot { display:inline-block; width:8px; height:8px; border-radius:999px; margin-right:6px; background:var(--warn); box-shadow:0 0 14px rgba(255,209,102,.7); animation:pulse 1.6s infinite; } @keyframes pulse { 0%{transform:scale(1);opacity:1;}70%{transform:scale(1.6);opacity:.25;}100%{transform:scale(1);opacity:1;} }
+    .grid { display:grid; grid-template-columns:1.1fr .9fr; gap:12px; } .left-col,.right-col { display:grid; gap:12px; min-width:0; }
+    .label { font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; margin-bottom:5px; }
+    .box { background:rgba(0,0,0,.24); border:1px solid var(--line); border-radius:12px; padding:10px; min-height:100px; white-space:pre-wrap; line-height:1.48; }
+    textarea,select,input,button { font:inherit; color:var(--txt); }
+    textarea,select,input { width:100%; border:1px solid var(--line); background:rgba(0,0,0,.28); border-radius:12px; padding:10px 11px; outline:none; transition:border-color .2s ease, transform .2s ease, box-shadow .2s ease; }
+    textarea:focus,select:focus,input:focus { border-color:#8aa0ff; box-shadow:0 0 0 3px rgba(124,109,255,.22); transform:translateY(-1px); }
+    input.error,textarea.error,select.error { border-color:var(--bad); box-shadow:0 0 0 3px rgba(255,107,136,.22); }
+    .form-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; } .actions { display:flex; gap:9px; flex-wrap:wrap; margin-top:10px; }
+    button { border:0; border-radius:12px; cursor:pointer; padding:10px 13px; font-weight:600; transition:transform .16s ease, box-shadow .2s ease, opacity .2s ease; } button:hover { transform:translateY(-2px); } button:disabled { opacity:.55; cursor:default; transform:none; }
+    .primary { background:linear-gradient(90deg,var(--accent),#9763ff); box-shadow:0 8px 20px rgba(124,109,255,.33); } .secondary { background:linear-gradient(90deg,#0ba8bb,var(--accent2)); box-shadow:0 8px 20px rgba(0,216,194,.28); } .ghost { background:rgba(255,255,255,.08); border:1px solid var(--line); } .danger { background:linear-gradient(90deg,#c94067,#d64f7d); box-shadow:0 8px 20px rgba(198,64,103,.28); }
+    .kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin-top:10px; } .kpi { background:rgba(255,255,255,.06); border:1px solid var(--line); border-radius:12px; padding:10px; } .kpi .k { color:var(--muted); font-size:12px; margin-bottom:4px; } .kpi .v { font-weight:700; font-size:18px; }
+    .reward { font-size:32px; font-weight:800; letter-spacing:.3px; margin:3px 0; transition:color .2s ease, text-shadow .2s ease; } .reward.good { color:var(--ok); text-shadow:0 0 14px rgba(87,226,157,.45); } .reward.mid { color:var(--warn); text-shadow:0 0 14px rgba(255,209,102,.38); } .reward.bad { color:var(--bad); text-shadow:0 0 14px rgba(255,107,136,.38); } .small { color:var(--muted); font-size:12px; } .spark { height:100px; width:100%; margin-top:6px; }
+    .timeline { max-height:280px; overflow:auto; display:grid; gap:8px; padding-right:3px; } .event { border:1px solid var(--line); background:rgba(255,255,255,.05); border-radius:10px; padding:8px 9px; font-size:13px; line-height:1.4; animation:rise .25s ease; } @keyframes rise { from { opacity:0; transform:translateY(6px);} to { opacity:1; transform:translateY(0);} } .event .meta { color:var(--muted); font-size:12px; margin-bottom:4px; }
+    .error-summary { margin:8px 0 0; border:1px solid rgba(255,107,136,.45); background:rgba(201,64,103,.15); border-radius:10px; padding:8px 10px; font-size:13px; display:none; } .error-summary.show { display:block; }
+    .inline-error { margin-top:4px; color:#ffb2c4; font-size:12px; min-height:16px; }
+    .toast { position:fixed; right:12px; top:12px; background:rgba(15,19,38,.95); border:1px solid var(--line); border-radius:12px; padding:9px 12px; opacity:0; transform:translateY(-10px); transition:all .22s ease; z-index:15; } .toast.show { opacity:1; transform:translateY(0); }
+    @media (max-width:1120px) { .topbar,.grid { grid-template-columns:1fr; } .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+    @media (max-width:1000px) { .form-grid { grid-template-columns:1fr; } }
   </style>
 </head>
-<body class="bg-anim">
+<body>
+  <div class="ambient"><canvas id="particles"></canvas></div>
   <div class="wrap">
-    <div class="hero">
-      <div class="card">
-        <h1>SocialEngineerArena Live Showcase</h1>
-        <div class="subtitle">Red-team / blue-team simulation with animated scoring and real API calls.</div>
-        <div class="stats">
-          <div class="pill">Mode: <strong id="modePill">Unknown</strong></div>
-          <div class="pill">Scenario: <strong id="scenarioPill">-</strong></div>
-          <div class="pill">Episode: <strong id="episodePill">0</strong></div>
+    <div class="topbar">
+      <div class="panel">
+        <h1>SocialEngineerArena Control Center</h1>
+        <div class="sub">Production-ready interface for running episodes, validating actions, and tracking rewards in real time.</div>
+        <div class="row">
+          <div class="badge"><span class="health-dot" id="healthDot"></span>API: <strong id="apiStatus">checking...</strong></div>
+          <div class="badge">Role: <strong id="rolePill">-</strong></div>
+          <div class="badge">Scenario: <strong id="scenarioPill">-</strong></div>
+          <div class="badge">Episode: <strong id="episodePill">0</strong></div>
+          <div class="badge">Step: <strong id="stepPill">0</strong></div>
         </div>
       </div>
-      <div class="card">
+      <div class="panel">
+        <div class="label">Interaction Mode</div>
+        <div class="form-grid">
+          <div><select id="modeSelect" aria-label="Action mode"><option value="manual">Manual (you decide)</option><option value="assisted">Assisted (rule suggestion)</option></select></div>
+          <div><input id="boundaryPreset" value="Defensive analysis only." aria-label="Safety boundary preset" /></div>
+        </div>
         <div class="label">Reward Meter</div>
-        <div id="rewardValue" class="reward mid">0.0000</div>
+        <div id="rewardValue" class="reward mid">0.000</div>
         <canvas id="spark" class="spark"></canvas>
-        <div class="small">Animated reward trend from recent actions.</div>
+        <div class="small">Live trend of submitted actions (session-local).</div>
       </div>
     </div>
-
-    <div class="layout">
-      <div class="card">
-        <div class="label">Incoming Message</div>
-        <div id="incomingMessage" class="box">Click "Start New Scenario".</div>
-        <div class="label" style="margin-top:10px;">Context</div>
-        <div id="contextBox" class="box"></div>
+    <div class="grid">
+      <div class="left-col">
+        <div class="panel">
+          <div class="label">Incoming Message</div>
+          <div id="incomingMessage" class="box">Click "Start Episode".</div>
+          <div class="label" style="margin-top:10px;">Context</div>
+          <div id="contextBox" class="box"></div>
+          <div class="kpis">
+            <div class="kpi"><div class="k">Episodes</div><div class="v" id="kpiEpisodes">0</div></div>
+            <div class="kpi"><div class="k">Submitted</div><div class="v" id="kpiActions">0</div></div>
+            <div class="kpi"><div class="k">Completed</div><div class="v" id="kpiDone">0</div></div>
+            <div class="kpi"><div class="k">Avg Reward</div><div class="v" id="kpiAvg">0.000</div></div>
+          </div>
+        </div>
+        <div class="panel"><div class="label">Episode Timeline</div><div id="timeline" class="timeline"></div></div>
       </div>
-
-      <div class="card">
-        <div class="row">
-          <div>
-            <div class="label">Verdict</div>
-            <select id="verdict">
-              <option value="unknown">unknown</option>
-              <option value="safe">safe</option>
-              <option value="phishing">phishing</option>
-              <option value="pretexting">pretexting</option>
-            </select>
+      <div class="right-col">
+        <div class="panel">
+          <div class="label">Action Editor</div>
+          <div class="form-grid">
+            <div><div class="label">Verdict</div><select id="verdict"><option value="unknown">unknown</option><option value="safe">safe</option><option value="phishing">phishing</option><option value="pretexting">pretexting</option></select><div id="verdictErr" class="inline-error" aria-live="polite"></div></div>
+            <div><div class="label">Safety Boundary</div><input id="safetyBoundary" value="Defensive analysis only." /><div id="boundaryErr" class="inline-error" aria-live="polite"></div></div>
           </div>
-          <div>
-            <div class="label">Safety Boundary</div>
-            <input id="safetyBoundary" value="Defensive classification only." />
-          </div>
+          <div class="label">Explanation</div><textarea id="explanation" rows="4" placeholder="Give evidence-backed reasoning tied to the message and policy..."></textarea><div id="explanationErr" class="inline-error" aria-live="polite"></div>
+          <div class="label">Cues Found (comma-separated)</div><input id="cuesFound" placeholder="urgency pressure, lookalike sender, credential solicitation" /><div id="cuesErr" class="inline-error" aria-live="polite"></div>
+          <div class="label">Response</div><textarea id="response" rows="3" placeholder="Optional responder message or simulation text"></textarea>
+          <div id="errorSummary" class="error-summary" role="alert"></div>
+          <div class="actions"><button id="resetBtn" class="secondary">Start Episode</button><button id="suggestBtn" class="ghost">Suggest Action</button><button id="stepBtn" class="primary">Submit Action</button><button id="clearBtn" class="danger">Clear Form</button></div>
         </div>
-        <div class="label">Explanation</div>
-        <textarea id="explanation" rows="4" placeholder="Explain concrete evidence and subtle cues..."></textarea>
-        <div class="label">Cues Found (comma separated)</div>
-        <input id="cuesFound" placeholder="lookalike sender, urgency, bypasses process" />
-        <div class="label">Response</div>
-        <textarea id="response" rows="3" placeholder="Optional defender response or attacker simulation text"></textarea>
-        <div class="btns">
-          <button id="resetBtn" class="secondary">Start New Scenario</button>
-          <button id="stepBtn" class="primary">Submit Action</button>
-          <button id="autoBtn" class="ghost">Autofill Defender Demo</button>
-        </div>
-        <div id="resultBox" class="box" style="margin-top:10px;"></div>
+        <div class="panel"><div class="label">Result</div><div id="resultBox" class="box">No actions submitted yet.</div></div>
       </div>
     </div>
   </div>
-
   <div id="toast" class="toast"></div>
-
   <script>
-    const rewardHistory = [];
-    let observation = null;
-    let episodeCount = 0;
-
-    const $ = (id) => document.getElementById(id);
-    const verdictEl = $("verdict");
-    const explanationEl = $("explanation");
-    const cuesFoundEl = $("cuesFound");
-    const responseEl = $("response");
-    const safetyBoundaryEl = $("safetyBoundary");
-    const rewardValueEl = $("rewardValue");
-    const resultBoxEl = $("resultBox");
-
-    function toast(msg) {
-      const t = $("toast");
-      t.textContent = msg;
-      t.classList.add("show");
-      setTimeout(() => t.classList.remove("show"), 1700);
-    }
-
-    function setBusy(v) {
-      $("resetBtn").disabled = v;
-      $("stepBtn").disabled = v;
-      $("autoBtn").disabled = v;
-    }
-
-    function setReward(v) {
-      rewardValueEl.textContent = Number(v).toFixed(4);
-      rewardValueEl.className = "reward " + (v >= 0.7 ? "good" : v >= 0.35 ? "mid" : "bad");
-      rewardHistory.push(v);
-      if (rewardHistory.length > 35) rewardHistory.shift();
-      drawSparkline();
-    }
-
-    function drawSparkline() {
-      const canvas = $("spark");
-      const ctx = canvas.getContext("2d");
-      canvas.width = canvas.clientWidth * (window.devicePixelRatio || 1);
-      canvas.height = canvas.clientHeight * (window.devicePixelRatio || 1);
-      ctx.scale(window.devicePixelRatio || 1, window.devicePixelRatio || 1);
-      const w = canvas.clientWidth, h = canvas.clientHeight;
-      ctx.clearRect(0, 0, w, h);
-      if (!rewardHistory.length) return;
-      const min = 0, max = 1;
-      const step = w / Math.max(1, rewardHistory.length - 1);
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = "#7c5cff";
-      ctx.beginPath();
-      rewardHistory.forEach((r, i) => {
-        const x = i * step;
-        const y = h - ((r - min) / (max - min + 1e-9)) * h;
-        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-    }
-
-    async function resetScenario() {
-      setBusy(true);
-      try {
-        const res = await fetch("api/reset", { method: "POST" });
-        if (!res.ok) throw new Error("Reset failed");
-        observation = await res.json();
-        episodeCount += 1;
-        $("modePill").textContent = observation.role;
-        $("scenarioPill").textContent = observation.scenario_id;
-        $("episodePill").textContent = String(episodeCount);
-        $("incomingMessage").textContent = observation.incoming_message;
-        $("contextBox").textContent = [
-          "Channel: " + observation.channel,
-          "Persona: " + observation.persona,
-          "Organization: " + observation.organization,
-          "Task: " + observation.task,
-          "",
-          "Thread Context:",
-          observation.thread_context,
-        ].join("\\n");
-        resultBoxEl.textContent = "Scenario loaded. Fill your action and submit.";
-        toast("Scenario loaded");
-      } catch (e) {
-        resultBoxEl.textContent = "Error: " + e.message;
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    function autofillDemo() {
-      verdictEl.value = "pretexting";
-      explanationEl.value = "The sender address is lookalike, urgency is used, sensitive account change is requested, and normal approval process is bypassed.";
-      cuesFoundEl.value = "lookalike sender, urgency, payroll change, bypasses process, secrecy";
-      responseEl.value = "Please confirm this request out-of-band through the official HR verification flow.";
-      safetyBoundaryEl.value = "Defensive analysis only.";
-      toast("Autofill ready");
-    }
-
-    async function submitAction() {
-      if (!observation) {
-        toast("Start a scenario first");
-        return;
-      }
-      setBusy(true);
-      try {
-        const payload = {
-          verdict: verdictEl.value,
-          explanation: explanationEl.value,
-          cues_found: cuesFoundEl.value.split(",").map(x => x.trim()).filter(Boolean),
-          response: responseEl.value,
-          safety_boundary: safetyBoundaryEl.value,
-        };
-        const res = await fetch("api/step", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) throw new Error("Step failed");
-        const out = await res.json();
-        setReward(out.reward ?? 0);
-        const breakdown = out?.observation?.reward_breakdown || {};
-        resultBoxEl.textContent = "Done: " + out.done + "\\nReward: " + (out.reward ?? 0).toFixed(4) + "\\n\\nBreakdown:\\n" + JSON.stringify(breakdown, null, 2);
-        toast("Action scored");
-      } catch (e) {
-        resultBoxEl.textContent = "Error: " + e.message;
-      } finally {
-        setBusy(false);
-      }
-    }
-
-    $("resetBtn").addEventListener("click", resetScenario);
-    $("stepBtn").addEventListener("click", submitAction);
-    $("autoBtn").addEventListener("click", autofillDemo);
-    window.addEventListener("resize", drawSparkline);
-
-    resetScenario();
+    const rewardHistory = []; const actionLog = []; let observation = null; let episodeCount = 0; let completedEpisodes = 0;
+    const $ = (id) => document.getElementById(id); const rewardValueEl = $("rewardValue"); const resultBoxEl = $("resultBox");
+    const modeSelectEl = $("modeSelect"); const verdictEl = $("verdict"); const explanationEl = $("explanation"); const cuesFoundEl = $("cuesFound"); const responseEl = $("response"); const safetyBoundaryEl = $("safetyBoundary"); const boundaryPresetEl = $("boundaryPreset");
+    function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1500); }
+    function setBusy(v) { for (const id of ["resetBtn","stepBtn","suggestBtn","clearBtn"]) $(id).disabled = v; }
+    function updateKpis() { $("kpiEpisodes").textContent = String(episodeCount); $("kpiActions").textContent = String(actionLog.length); $("kpiDone").textContent = String(completedEpisodes); const avg = rewardHistory.length ? rewardHistory.reduce((a,b)=>a+b,0)/rewardHistory.length : 0; $("kpiAvg").textContent = avg.toFixed(3); }
+    function setReward(v) { rewardValueEl.textContent = Number(v).toFixed(3); rewardValueEl.className = "reward " + (v >= 0.7 ? "good" : v >= 0.35 ? "mid" : "bad"); rewardHistory.push(v); if (rewardHistory.length > 60) rewardHistory.shift(); drawSparkline(); updateKpis(); }
+    function drawSparkline() { const canvas = $("spark"); const ctx = canvas.getContext("2d"); const ratio = window.devicePixelRatio || 1; canvas.width = canvas.clientWidth * ratio; canvas.height = canvas.clientHeight * ratio; ctx.setTransform(ratio,0,0,ratio,0,0); const w = canvas.clientWidth; const h = canvas.clientHeight; ctx.clearRect(0,0,w,h); if (!rewardHistory.length) return; ctx.strokeStyle = "rgba(255,255,255,.18)"; ctx.lineWidth = 1; for (const y of [0.25,0.5,0.75]) { ctx.beginPath(); ctx.moveTo(0,h*y); ctx.lineTo(w,h*y); ctx.stroke(); } const step = w / Math.max(1, rewardHistory.length - 1); const grad = ctx.createLinearGradient(0,0,w,0); grad.addColorStop(0,"#00d8c2"); grad.addColorStop(1,"#7c6dff"); ctx.strokeStyle = grad; ctx.lineWidth = 2.4; ctx.beginPath(); rewardHistory.forEach((r,i) => { const x = i*step; const y = h - Math.max(0,Math.min(1,r))*h; if (i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); }); ctx.stroke(); }
+    function clearErrors() { $("errorSummary").classList.remove("show"); $("errorSummary").textContent = ""; for (const id of ["verdictErr","boundaryErr","explanationErr","cuesErr"]) $(id).textContent = ""; for (const id of ["verdict","safetyBoundary","explanation","cuesFound"]) $(id).classList.remove("error"); }
+    function validateForm() { clearErrors(); const errors = []; const explanation = explanationEl.value.trim(); const boundary = safetyBoundaryEl.value.trim(); const cues = cuesFoundEl.value.split(",").map((x)=>x.trim()).filter(Boolean); if (!verdictEl.value) { errors.push("Verdict is required."); $("verdictErr").textContent = "Choose a verdict."; verdictEl.classList.add("error"); } if (explanation.length < 16) { errors.push("Explanation should be at least 16 characters."); $("explanationErr").textContent = "Add evidence-based reasoning."; explanationEl.classList.add("error"); } if (!boundary) { errors.push("Safety boundary cannot be empty."); $("boundaryErr").textContent = "Set a clear safety boundary."; safetyBoundaryEl.classList.add("error"); } if (cues.length === 0) { errors.push("Add at least one cue."); $("cuesErr").textContent = "Add at least one cue."; cuesFoundEl.classList.add("error"); } if (errors.length) { const summary = $("errorSummary"); summary.textContent = "Please fix: " + errors.join(" "); summary.classList.add("show"); return false; } return true; }
+    function inferVerdict(message) { const m = (message || "").toLowerCase(); const bad = ["urgent","verify","password","otp","gift card","wire","bank","account suspended","click","final warning","payroll"]; const score = bad.reduce((n,t)=>n+(m.includes(t)?1:0),0); if (score >= 3) return "phishing"; if (score >= 1) return "pretexting"; return "safe"; }
+    function suggestAction() { if (!observation) { toast("Start episode first"); return; } const mode = modeSelectEl.value; const inferred = inferVerdict(observation.incoming_message); const isAssisted = mode === "assisted"; verdictEl.value = inferred; explanationEl.value = isAssisted ? "Assisted suggestion: verdict inferred from urgency, process bypass signals, and potential credential solicitation cues in the incoming message." : "Manual-ready draft: validate sender authenticity, urgency pressure, and process conformance before confirming final verdict."; cuesFoundEl.value = isAssisted ? "urgency pressure, process bypass attempt, sender authenticity risk" : "sender verification pending"; responseEl.value = inferred === "safe" ? "Acknowledged. Processing through normal approved workflow." : "This request requires out-of-band verification through approved policy channels."; safetyBoundaryEl.value = boundaryPresetEl.value.trim() || "Defensive analysis only."; toast("Suggestion applied"); }
+    function pushEvent(title, details, reward, done) { const item = { at:new Date().toLocaleTimeString(), title, details, reward, done }; actionLog.unshift(item); const host = $("timeline"); host.innerHTML = actionLog.slice(0,50).map((e)=>( '<div class="event"><div class="meta">' + e.at + " • " + e.title + (e.done ? " • episode complete" : "") + '</div><div>' + e.details.replace(/</g,"&lt;").replace(/>/g,"&gt;") + '</div><div class="meta">reward: ' + Number(e.reward || 0).toFixed(3) + '</div></div>' )).join(""); updateKpis(); }
+    async function checkHealth() { try { const res = await fetch("health"); if (!res.ok) throw new Error("bad"); $("apiStatus").textContent = "online"; $("healthDot").style.background = "var(--ok)"; $("healthDot").style.boxShadow = "0 0 14px rgba(87,226,157,.7)"; } catch (_e) { $("apiStatus").textContent = "offline"; $("healthDot").style.background = "var(--bad)"; $("healthDot").style.boxShadow = "0 0 14px rgba(255,107,136,.6)"; } }
+    async function resetScenario() { setBusy(true); clearErrors(); try { const res = await fetch("reset", { method:"POST" }); if (!res.ok) throw new Error("Reset failed"); observation = await res.json(); episodeCount += 1; $("rolePill").textContent = observation.role; $("scenarioPill").textContent = observation.scenario_id; $("episodePill").textContent = String(episodeCount); $("stepPill").textContent = String(observation.turn_index); $("incomingMessage").textContent = observation.incoming_message; $("contextBox").textContent = ["Channel: " + observation.channel, "Persona: " + observation.persona, "Organization: " + observation.organization, "Task: " + observation.task, "", "Policy:", observation.policy_excerpt || "(none)", "", "Thread Context:", observation.thread_context || "(none)"].join("\\n"); resultBoxEl.textContent = "Episode initialized. Prepare action and submit."; safetyBoundaryEl.value = boundaryPresetEl.value.trim() || "Defensive analysis only."; pushEvent("Episode started", "Scenario " + observation.scenario_id + " loaded.", 0, false); toast("Episode loaded"); } catch (e) { resultBoxEl.textContent = "Error: " + e.message; } finally { setBusy(false); } }
+    async function submitAction() { if (!observation) { toast("Start episode first"); return; } if (!validateForm()) return; setBusy(true); try { const payload = { verdict: verdictEl.value, explanation: explanationEl.value.trim(), cues_found: cuesFoundEl.value.split(",").map((x)=>x.trim()).filter(Boolean), response: responseEl.value.trim(), safety_boundary: safetyBoundaryEl.value.trim() }; const res = await fetch("step", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) }); const out = await res.json(); if (!res.ok) throw new Error(out.detail || "Step failed"); observation = out.observation; $("stepPill").textContent = String(observation.turn_index); $("incomingMessage").textContent = observation.incoming_message; const reward = Number(out.reward || 0); setReward(reward); if (out.done) completedEpisodes += 1; const breakdown = out?.observation?.reward_breakdown || {}; resultBoxEl.textContent = ["done: " + out.done, "reward: " + reward.toFixed(3), "", "breakdown:", JSON.stringify(breakdown, null, 2)].join("\\n"); pushEvent("Action submitted", "Verdict: " + payload.verdict + " | cues: " + payload.cues_found.slice(0,3).join(", "), reward, !!out.done); if (out.done) toast("Episode complete"); else toast("Turn scored"); } catch (e) { resultBoxEl.textContent = "Error: " + e.message; } finally { setBusy(false); } }
+    function clearForm() { explanationEl.value = ""; cuesFoundEl.value = ""; responseEl.value = ""; verdictEl.value = "unknown"; safetyBoundaryEl.value = boundaryPresetEl.value.trim() || "Defensive analysis only."; clearErrors(); toast("Form cleared"); }
+    function persistPrefs() { localStorage.setItem("sea_mode", modeSelectEl.value); localStorage.setItem("sea_boundary", boundaryPresetEl.value); }
+    function loadPrefs() { modeSelectEl.value = localStorage.getItem("sea_mode") || "manual"; boundaryPresetEl.value = localStorage.getItem("sea_boundary") || "Defensive analysis only."; safetyBoundaryEl.value = boundaryPresetEl.value; }
+    function bootParticles() { const canvas = $("particles"); const ctx = canvas.getContext("2d"); let w = 0; let h = 0; const dots = Array.from({ length:42 }).map(() => ({ x:Math.random(), y:Math.random(), r:Math.random()*2.2+.8, vx:(Math.random()-0.5)*0.0005, vy:(Math.random()-0.5)*0.0005 })); function resize() { w = canvas.clientWidth = window.innerWidth; h = canvas.clientHeight = window.innerHeight; const dpr = window.devicePixelRatio || 1; canvas.width = w*dpr; canvas.height = h*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); } function tick() { ctx.clearRect(0,0,w,h); for (const d of dots) { d.x += d.vx; d.y += d.vy; if (d.x < 0 || d.x > 1) d.vx *= -1; if (d.y < 0 || d.y > 1) d.vy *= -1; const x = d.x*w; const y = d.y*h; const g = ctx.createRadialGradient(x,y,0,x,y,d.r*8); g.addColorStop(0,"rgba(122,109,255,.35)"); g.addColorStop(1,"rgba(0,216,194,0)"); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x,y,d.r*8,0,Math.PI*2); ctx.fill(); } requestAnimationFrame(tick); } resize(); window.addEventListener("resize", resize); requestAnimationFrame(tick); }
+    $("resetBtn").addEventListener("click", resetScenario); $("stepBtn").addEventListener("click", submitAction); $("suggestBtn").addEventListener("click", suggestAction); $("clearBtn").addEventListener("click", clearForm); modeSelectEl.addEventListener("change", persistPrefs); boundaryPresetEl.addEventListener("change", () => { safetyBoundaryEl.value = boundaryPresetEl.value; persistPrefs(); }); window.addEventListener("resize", drawSparkline); window.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "enter") submitAction(); });
+    loadPrefs(); bootParticles(); checkHealth(); setInterval(checkHealth, 10000); drawSparkline(); updateKpis(); resetScenario();
   </script>
 </body>
 </html>"""
