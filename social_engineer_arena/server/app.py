@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse
 from fastapi.responses import RedirectResponse
 try:
@@ -19,9 +19,9 @@ env = SocialEngineerArenaEnvironment()
 
 def attach_showcase_routes(app: FastAPI) -> None:
     @app.get("/")
-    def root_redirect() -> RedirectResponse:
-        # Make the showcase UI the default Space landing page.
-        return RedirectResponse(url="/arena")
+    def root_redirect(request: Request) -> RedirectResponse:
+        # Use request-aware URL generation so it works on hf.space and proxied huggingface.co routes.
+        return RedirectResponse(url=str(request.url_for("arena_showcase")))
 
     @app.get("/health")
     def health() -> dict[str, str]:
@@ -307,7 +307,7 @@ def attach_showcase_routes(app: FastAPI) -> None:
     async function resetScenario() {
       setBusy(true);
       try {
-        const res = await fetch("/api/reset", { method: "POST" });
+        const res = await fetch("api/reset", { method: "POST" });
         if (!res.ok) throw new Error("Reset failed");
         observation = await res.json();
         episodeCount += 1;
@@ -356,7 +356,7 @@ def attach_showcase_routes(app: FastAPI) -> None:
           response: responseEl.value,
           safety_boundary: safetyBoundaryEl.value,
         };
-        const res = await fetch("/api/step", {
+        const res = await fetch("api/step", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(payload),
