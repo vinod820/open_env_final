@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import uuid
 from pathlib import Path
 from typing import Any
@@ -29,6 +30,11 @@ class SocialEngineerArenaEnvironment(Environment[ArenaAction, ArenaObservation, 
         super().__init__()
         path = scenarios_path or DATA_PATH
         all_scenarios: list[dict[str, Any]] = json.loads(path.read_text(encoding="utf-8"))
+        self.single_turn_episodes = os.getenv("SINGLE_TURN_EPISODES", "true").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
         self.split = split
         if split == "all":
             self.scenarios = all_scenarios
@@ -52,7 +58,7 @@ class SocialEngineerArenaEnvironment(Environment[ArenaAction, ArenaObservation, 
             role=scenario["role"],
             scenario_id=scenario["id"],
             turn_index=0,
-            total_turns=max(1, len(turns)),
+            total_turns=1 if self.single_turn_episodes else max(1, len(turns)),
             cumulative_turn_reward=0.0,
             turn_rewards=[],
             verdict_history=[],

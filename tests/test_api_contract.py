@@ -29,6 +29,8 @@ def test_canonical_and_api_endpoints_are_available():
     assert "reward" in step.json()
     assert "done" in step.json()
 
+    # Start a fresh episode before calling the mirrored /api/step endpoint.
+    client.post("/api/reset")
     api_step = client.post("/api/step", json=action)
     assert api_step.status_code == 200
     assert "observation" in api_step.json()
