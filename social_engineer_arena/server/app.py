@@ -309,6 +309,11 @@ def attach_showcase_routes(app: FastAPI) -> None:
     .error-summary { margin:8px 0 0; border:1px solid rgba(255,107,136,.45); background:rgba(201,64,103,.15); border-radius:10px; padding:8px 10px; font-size:13px; display:none; } .error-summary.show { display:block; }
     .inline-error { margin-top:4px; color:#ffb2c4; font-size:12px; min-height:16px; }
     .toast { position:fixed; right:12px; top:12px; background:rgba(15,19,38,.95); border:1px solid var(--line); border-radius:12px; padding:9px 12px; opacity:0; transform:translateY(-10px); transition:all .22s ease; z-index:15; } .toast.show { opacity:1; transform:translateY(0); }
+    .doc-grid { display:grid; gap:8px; margin-top:8px; }
+    .doc-item { border:1px solid var(--line); border-radius:10px; background:rgba(255,255,255,.04); padding:9px; }
+    .doc-item code { font-size:12px; color:#cce0ff; }
+    .feature-list { margin-left:16px; color:var(--muted); line-height:1.5; }
+    .feature-list li { margin-bottom:6px; }
     @media (max-width:1120px) { .topbar,.grid { grid-template-columns:1fr; } .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } }
     @media (max-width:1000px) { .form-grid { grid-template-columns:1fr; } }
   </style>
@@ -370,6 +375,25 @@ def attach_showcase_routes(app: FastAPI) -> None:
           <div class="actions"><button id="resetBtn" class="secondary">Start Episode</button><button id="suggestBtn" class="ghost">Suggest Action</button><button id="stepBtn" class="primary">Submit Action</button><button id="clearBtn" class="danger">Clear Form</button></div>
         </div>
         <div class="panel"><div class="label">Result</div><div id="resultBox" class="box">No actions submitted yet.</div></div>
+        <div class="panel">
+          <div class="label">API Docs</div>
+          <div class="small">In-app reference for integration, testing, and hackathon demos.</div>
+          <div class="doc-grid">
+            <div class="doc-item"><strong>POST /reset</strong><br><code>{}</code><br><span class="small">Starts a new episode and returns <code>ArenaObservation</code>.</span></div>
+            <div class="doc-item"><strong>POST /step</strong><br><code>{"verdict":"safe","explanation":"...","cues_found":["..."],"response":"...","safety_boundary":"..."}</code><br><span class="small">Scores current turn and returns <code>{observation,reward,done}</code>.</span></div>
+            <div class="doc-item"><strong>POST /suggest</strong><br><code>{}</code><br><span class="small">Gets model-backed action suggestion. Requires <code>HF_TOKEN</code> + model endpoint env.</span></div>
+            <div class="doc-item"><strong>GET /state</strong><br><code>n/a</code><br><span class="small">Returns current <code>ArenaState</code> for UI sync/monitoring.</span></div>
+            <div class="doc-item"><strong>GET /health</strong><br><code>n/a</code><br><span class="small">Basic service health probe. Returns <code>{"status":"ok"}</code>.</span></div>
+          </div>
+          <div class="label" style="margin-top:10px;">More Features You Can Implement</div>
+          <ul class="feature-list">
+            <li>Replay mode with per-turn diff of model suggestion vs submitted action.</li>
+            <li>Leaderboard panel for average reward by model/version.</li>
+            <li>Evaluation tab for train/test split metrics and confusion matrix.</li>
+            <li>Prompt/version registry in UI to compare multiple suggest models live.</li>
+            <li>Judge mode export: one-click bundle of episode traces + scores as JSONL.</li>
+          </ul>
+        </div>
       </div>
     </div>
   </div>
