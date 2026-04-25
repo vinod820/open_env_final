@@ -18,16 +18,6 @@ env = SocialEngineerArenaEnvironment()
 
 
 def attach_showcase_routes(app: FastAPI) -> None:
-    @app.get("/")
-    def root_redirect(request: Request) -> RedirectResponse:
-        # Use request-aware URL generation so it works on hf.space and proxied huggingface.co routes.
-        return RedirectResponse(url=str(request.url_for("arena_showcase")))
-
-    @app.get("/web")
-    def web_redirect(request: Request) -> RedirectResponse:
-        # Keep OpenEnv web entrypoint path but show the custom showcase UI.
-        return RedirectResponse(url=str(request.url_for("arena_showcase")))
-
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -388,6 +378,14 @@ def attach_showcase_routes(app: FastAPI) -> None:
   </script>
 </body>
 </html>"""
+
+    @app.get("/", response_class=HTMLResponse)
+    def root_showcase() -> str:
+        return arena_showcase()
+
+    @app.get("/web", response_class=HTMLResponse)
+    def web_showcase() -> str:
+        return arena_showcase()
 
 
 app = FastAPI(title="SocialEngineerArena")
