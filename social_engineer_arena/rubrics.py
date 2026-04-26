@@ -33,6 +33,17 @@ def text_contains_any(text: str, needles: Iterable[str]) -> bool:
     return any(needle.lower() in lowered for needle in needles)
 
 
+def is_low_signal_message(message: str) -> bool:
+    text = (message or "").strip().lower()
+    if not text:
+        return True
+    # URL-only / link-only messages are too ambiguous for confident classification.
+    if re.fullmatch(r"(https?://\S+|\w+\.\w{2,}(/\S*)?)", text):
+        return True
+    words = re.findall(r"[a-zA-Z]{3,}", text)
+    return len(words) < 4
+
+
 def cue_coverage(action: ArenaAction, target_cues: list[str]) -> tuple[float, list[str]]:
     answer = " ".join([action.explanation, action.response, " ".join(action.cues_found)]).lower()
     found: list[str] = []
@@ -75,11 +86,28 @@ def score_defense(action: ArenaAction, scenario: dict) -> RewardBreakdown:
     reasoning = reasoning_score(action)
     verdict = 1.0 if action.verdict == label else 0.0
     calibration = 0.0
+    low_signal = is_low_signal_message(scenario.get("incoming_message", ""))
+    notes = [f"matched cues: {', '.join(found) if found else 'none'}"]
+    if low_signal:
+        # Force uncertainty on low-information inputs instead of rewarding confident phishing calls.
+        verdict = 1.0 if action.verdict == "unknown" else 0.0
+        coverage = min(coverage, 0.2)
+        calibration = 1.0 if action.verdict == "unknown" else 0.0
+        notes.append("low-signal incoming message: reward expects unknown + request for more context")
+        total = 0.4 * verdict + 0.25 * reasoning + 0.25 * coverage + 0.1 * calibration
+        return RewardBreakdown(
+            total=round(total, 4),
+            verdict=round(0.4 * verdict, 4),
+            reasoning=round(0.25 * reasoning, 4),
+            cue_coverage=round(0.25 * coverage, 4),
+            calibration=round(0.1 * calibration, 4),
+            notes=notes,
+        )
+
     if label == "safe":
         calibration = 1.0 if text_contains_any(action.explanation, scenario["legitimate_cues"]) else 0.45
     elif action.verdict != "safe" and text_contains_any(action.explanation, ["verify", "out-of-band", "policy", "confirm"]):
         calibration = 1.0
-    notes = [f"matched cues: {', '.join(found) if found else 'none'}"]
     total = 0.4 * verdict + 0.25 * reasoning + 0.25 * coverage + 0.1 * calibration
     return RewardBreakdown(
         total=round(total, 4),
