@@ -1,3 +1,13 @@
-from social_engineer_arena.server.app import app
+from social_engineer_arena.server.app import app as app
+from social_engineer_arena.server.app import main as _pkg_main
 
-__all__ = ["app"]
+
+def main() -> None:
+    _pkg_main()
+
+
+if __name__ == "__main__":
+    main()
+
+
+__all__ = ["app", "main"]

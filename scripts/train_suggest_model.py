@@ -36,7 +36,9 @@ def main() -> None:
     os.environ.setdefault("LEARNING_RATE", "2e-5")
     os.environ.setdefault("GRAD_ACCUM_STEPS", "8")
     os.environ.setdefault("MAX_LENGTH", "256")
-    os.environ.setdefault("EVAL_STRATEGY", "steps")
+    # Default to no eval for faster hackathon iteration.
+    # Training logs (loss, lr, grad norm, etc.) still appear normally.
+    os.environ.setdefault("EVAL_STRATEGY", "no")
     os.environ.setdefault("EVAL_STEPS", "20")
     os.environ.setdefault("SAVE_STEPS", "40")
     os.environ.setdefault("MAX_EVAL_SCENARIOS", "150")
