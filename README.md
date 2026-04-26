@@ -25,6 +25,8 @@ It is a decision-training world.
 ## Judge Quickstart (3-5 Minutes)
 
 - Live environment: [Hugging Face Space](https://huggingface.co/spaces/vinod2005/social-engineer-arena)
+- Live learning page (one-click train + live curves/logs): [Live Learning Console](https://huggingface.co/spaces/vinod2005/social-engineer-arena/)
+- Previous run evidence page (saved curves + metrics snapshot): [Previous Curves & Results](https://huggingface.co/spaces/vinod2005/social-engineer-arena/)
 - Re-runnable training: [Google Colab Notebook](https://colab.research.google.com/drive/1AWQWs_8il-g0JJK7-qw9JcyN_x68u_Er?usp=sharing)
 - Mini-blog writeup: `blog.md`
 - Command runbook: `RUNBOOK.md`
@@ -66,6 +68,25 @@ We implemented an OpenEnv-compatible environment and training loop that includes
 - **Training pipelines** with TRL SFT and TRL GRPO
 
 This is designed as a proper training system, not a static classification demo.
+
+---
+
+## New Demo Pages in Space
+
+To make judging faster, the Space now includes two dedicated evidence pages:
+
+- **Live Learning Console** (`/insights/live`)
+  - one click on **Start Learning** triggers `/train`
+  - live status, live training logs, and live loss/reward curves
+  - useful for showing training is actually running now
+
+- **Previous Curves & Results** (`/insights/history`)
+  - displays saved curve images from `assets/`
+  - displays baseline and latest run summaries from `outputs/`
+  - useful for showing before/after evidence quickly
+
+Judge flow we recommend:
+**Arena behavior demo -> Live Learning run -> Previous Results proof snapshot**.
 
 ---
 
@@ -152,6 +173,8 @@ Open:
 
 - `http://localhost:8000/arena`
 - `http://localhost:8000/web`
+- `http://localhost:8000/insights/live`
+- `http://localhost:8000/insights/history`
 
 Quick GRPO run:
 

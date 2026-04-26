@@ -76,6 +76,23 @@ We also prepared a re-runnable Colab so judges can run the same flow without loc
 
 API routes are available for automation: `/reset`, `/step`, `/state`, `/suggest`, `/train`, `/train/status`.
 
+## New pages for judges
+
+We added two dedicated pages so evaluation is faster and clearer:
+
+1. **Live Learning Console**  
+   [https://huggingface.co/spaces/vinod2005/social-engineer-arena](https://huggingface.co/spaces/vinod2005/social-engineer-arena/)  
+   - click one button (**Start Learning**)  
+   - stream live training logs  
+   - watch live loss and reward curves update
+
+2. **Previous Curves & Results**  
+   [https://huggingface.co/spaces/vinod2005/social-engineer-arena/](https://huggingface.co/spaces/vinod2005/social-engineer-arena/)  
+   - shows saved reward/loss/GRPO curves  
+   - shows latest metrics snapshot from previous runs
+
+Both pages include a close button to return to the home arena page.
+
 ## What improved after training
 
 From `outputs/evals/baseline_results.json`:
