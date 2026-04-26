@@ -545,7 +545,7 @@ def attach_showcase_routes(app: FastAPI) -> None:
       <div class="panel">
         <div class="label">Interaction Mode</div>
         <div class="form-grid">
-          <div><select id="modeSelect" aria-label="Action mode"><option value="manual">Manual (you decide)</option><option value="assisted">Assisted (model suggestion)</option></select></div>
+          <div><input value="Manual mode only" aria-label="Action mode" readonly /></div>
           <div><input id="boundaryPreset" value="Defensive analysis only." aria-label="Safety boundary preset" /></div>
         </div>
         <div class="label">Reward Meter</div>
@@ -572,6 +572,10 @@ def attach_showcase_routes(app: FastAPI) -> None:
       </div>
       <div class="right-col">
         <div class="panel">
+          <div class="label">How It Works</div>
+          <div class="small">1) Start episode -> 2) Enter action -> 3) Submit and inspect reward</div>
+        </div>
+        <div class="panel">
           <div class="label">Action Editor</div>
           <div class="form-grid">
             <div><div class="label">Verdict</div><select id="verdict"><option value="unknown">unknown</option><option value="safe">safe</option><option value="phishing">phishing</option><option value="pretexting">pretexting</option></select><div id="verdictErr" class="inline-error" aria-live="polite"></div></div>
@@ -581,7 +585,7 @@ def attach_showcase_routes(app: FastAPI) -> None:
           <div class="label">Cues Found (comma-separated)</div><input id="cuesFound" placeholder="urgency pressure, lookalike sender, credential solicitation" /><div id="cuesErr" class="inline-error" aria-live="polite"></div>
           <div class="label">Response</div><textarea id="response" rows="3" placeholder="Optional responder message or simulation text"></textarea>
           <div id="errorSummary" class="error-summary" role="alert"></div>
-          <div class="actions"><button id="resetBtn" class="secondary">Start Episode</button><button id="suggestBtn" class="ghost">Suggest Action</button><button id="stepBtn" class="primary">Submit Action</button><button id="exportBtn" class="ghost">Export Trace JSONL</button><button id="clearBtn" class="danger">Clear Form</button></div>
+          <div class="actions"><button id="resetBtn" class="secondary" title="Start a new scenario episode and load the first message context.">Start Episode</button><button id="stepBtn" class="primary" title="Submit your current action to score this turn and move to the next state.">Submit Action</button><button id="exportBtn" class="ghost" title="Download the current session timeline as a JSONL trace file.">Export Trace JSONL</button><button id="clearBtn" class="danger" title="Reset form fields to defaults without starting a new episode.">Clear Form</button></div>
         </div>
         <div class="panel"><div class="label">Result</div><div id="resultBox" class="box">No actions submitted yet.</div></div>
         <div class="panel">
@@ -621,14 +625,13 @@ def attach_showcase_routes(app: FastAPI) -> None:
     const rewardHistory = []; const actionLog = []; let observation = null; let episodeCount = 0; let completedEpisodes = 0;
     const sessionMetrics = { suggestCalls: 0, parsedSuggest: 0, suggestLatencyMs: [], finalRewards: [] };
     const $ = (id) => document.getElementById(id); const rewardValueEl = $("rewardValue"); const resultBoxEl = $("resultBox");
-    const modeSelectEl = $("modeSelect"); const verdictEl = $("verdict"); const explanationEl = $("explanation"); const cuesFoundEl = $("cuesFound"); const responseEl = $("response"); const safetyBoundaryEl = $("safetyBoundary"); const boundaryPresetEl = $("boundaryPreset");
+    const verdictEl = $("verdict"); const explanationEl = $("explanation"); const cuesFoundEl = $("cuesFound"); const responseEl = $("response"); const safetyBoundaryEl = $("safetyBoundary"); const boundaryPresetEl = $("boundaryPreset");
     function toast(msg) { const t = $("toast"); t.textContent = msg; t.classList.add("show"); setTimeout(() => t.classList.remove("show"), 1500); }
-    function setBusy(v) { for (const id of ["resetBtn","stepBtn","suggestBtn","clearBtn"]) $(id).disabled = v; }
+    function setBusy(v) { for (const id of ["resetBtn","stepBtn","clearBtn"]) $(id).disabled = v; }
     function syncActionControls() {
       const done = !!(observation && observation.done);
       const active = !!(observation && !observation.done);
       $("stepBtn").disabled = done;
-      $("suggestBtn").disabled = done;
       $("resetBtn").disabled = active;
     }
     function updateKpis() { $("kpiEpisodes").textContent = String(episodeCount); $("kpiActions").textContent = String(actionLog.length); $("kpiDone").textContent = String(completedEpisodes); const avg = rewardHistory.length ? rewardHistory.reduce((a,b)=>a+b,0)/rewardHistory.length : 0; $("kpiAvg").textContent = avg.toFixed(3); updateScoreboard(); }
@@ -644,10 +647,10 @@ def attach_showcase_routes(app: FastAPI) -> None:
     async function submitAction() { if (!observation) { toast("Start episode first"); return; } if (observation.done) { toast("Episode complete. Start a new episode."); syncActionControls(); return; } if (!validateForm()) return; setBusy(true); try { const payload = { verdict: verdictEl.value, explanation: explanationEl.value.trim(), cues_found: cuesFoundEl.value.split(",").map((x)=>x.trim()).filter(Boolean), response: responseEl.value.trim(), safety_boundary: safetyBoundaryEl.value.trim() }; const res = await fetch("step", { method:"POST", headers:{ "Content-Type":"application/json" }, body: JSON.stringify(payload) }); const out = await res.json(); if (!res.ok) throw new Error(out.detail || "Step failed"); observation = out.observation; $("stepPill").textContent = String(observation.turn_index + 1) + "/" + String(observation.total_turns); $("incomingMessage").textContent = observation.incoming_message; const reward = Number(out.reward || 0); setReward(reward); if (out.done) { completedEpisodes += 1; sessionMetrics.finalRewards.push(reward); } const breakdown = out?.observation?.reward_breakdown || {}; resultBoxEl.textContent = ["done: " + out.done, "reward: " + reward.toFixed(3), "", "breakdown:", JSON.stringify(breakdown, null, 2)].join("\\n"); pushEvent("Action submitted", "Verdict: " + payload.verdict + " | cues: " + payload.cues_found.slice(0,3).join(", "), reward, !!out.done); if (out.done) toast("Episode complete. Start next episode."); else toast("Turn scored"); } catch (e) { resultBoxEl.textContent = "Error: " + e.message; } finally { updateScoreboard(); setBusy(false); syncActionControls(); } }
     function exportTrace() { const lines = actionLog.map((e) => JSON.stringify(e)); const blob = new Blob([lines.join("\\n") + "\\n"], { type:"application/jsonl" }); const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = "social_engineer_arena_trace.jsonl"; a.click(); URL.revokeObjectURL(a.href); toast("Trace exported"); }
     function clearForm() { explanationEl.value = ""; cuesFoundEl.value = ""; responseEl.value = ""; verdictEl.value = "unknown"; safetyBoundaryEl.value = boundaryPresetEl.value.trim() || "Defensive analysis only."; clearErrors(); toast("Form cleared"); }
-    function persistPrefs() { localStorage.setItem("sea_mode", modeSelectEl.value); localStorage.setItem("sea_boundary", boundaryPresetEl.value); }
-    function loadPrefs() { modeSelectEl.value = localStorage.getItem("sea_mode") || "manual"; boundaryPresetEl.value = localStorage.getItem("sea_boundary") || "Defensive analysis only."; safetyBoundaryEl.value = boundaryPresetEl.value; }
+    function persistPrefs() { localStorage.setItem("sea_boundary", boundaryPresetEl.value); }
+    function loadPrefs() { boundaryPresetEl.value = localStorage.getItem("sea_boundary") || "Defensive analysis only."; safetyBoundaryEl.value = boundaryPresetEl.value; }
     function bootParticles() { const canvas = $("particles"); const ctx = canvas.getContext("2d"); let w = 0; let h = 0; const dots = Array.from({ length:42 }).map(() => ({ x:Math.random(), y:Math.random(), r:Math.random()*2.2+.8, vx:(Math.random()-0.5)*0.0005, vy:(Math.random()-0.5)*0.0005 })); function resize() { w = canvas.clientWidth = window.innerWidth; h = canvas.clientHeight = window.innerHeight; const dpr = window.devicePixelRatio || 1; canvas.width = w*dpr; canvas.height = h*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); } function tick() { ctx.clearRect(0,0,w,h); for (const d of dots) { d.x += d.vx; d.y += d.vy; if (d.x < 0 || d.x > 1) d.vx *= -1; if (d.y < 0 || d.y > 1) d.vy *= -1; const x = d.x*w; const y = d.y*h; const g = ctx.createRadialGradient(x,y,0,x,y,d.r*8); g.addColorStop(0,"rgba(122,109,255,.35)"); g.addColorStop(1,"rgba(0,216,194,0)"); ctx.fillStyle = g; ctx.beginPath(); ctx.arc(x,y,d.r*8,0,Math.PI*2); ctx.fill(); } requestAnimationFrame(tick); } resize(); window.addEventListener("resize", resize); requestAnimationFrame(tick); }
-    $("resetBtn").addEventListener("click", resetScenario); $("stepBtn").addEventListener("click", submitAction); $("suggestBtn").addEventListener("click", suggestAction); $("exportBtn").addEventListener("click", exportTrace); $("clearBtn").addEventListener("click", clearForm); modeSelectEl.addEventListener("change", persistPrefs); boundaryPresetEl.addEventListener("change", () => { safetyBoundaryEl.value = boundaryPresetEl.value; persistPrefs(); }); window.addEventListener("resize", drawSparkline); window.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "enter") submitAction(); });
+    $("resetBtn").addEventListener("click", resetScenario); $("stepBtn").addEventListener("click", submitAction); $("exportBtn").addEventListener("click", exportTrace); $("clearBtn").addEventListener("click", clearForm); boundaryPresetEl.addEventListener("change", () => { safetyBoundaryEl.value = boundaryPresetEl.value; persistPrefs(); }); window.addEventListener("resize", drawSparkline); window.addEventListener("keydown", (e) => { if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "enter") submitAction(); });
     loadPrefs(); bootParticles(); checkHealth(); setInterval(checkHealth, 10000); drawSparkline(); updateKpis(); syncActionControls(); resetScenario();
   </script>
 </body>
