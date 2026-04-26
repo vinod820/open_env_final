@@ -86,7 +86,7 @@ Scenarios are split into:
 - `train`
 - `test` (unseen split for generalization checks)
 
-Stored in `social_engineer_arena/data/scenarios.json`.
+Stored in `social_engineer_arena/data/scenarios.large.json` (default runtime dataset).
 
 ### Public data sources used for large-scale scenario generation
 

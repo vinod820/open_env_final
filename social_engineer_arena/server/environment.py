@@ -20,7 +20,7 @@ from social_engineer_arena.models import ArenaAction, ArenaObservation, ArenaSta
 from social_engineer_arena.rubrics import score_attack, score_defense
 
 
-DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "scenarios.json"
+DATA_PATH = Path(__file__).resolve().parents[1] / "data" / "scenarios.large.json"
 
 
 class SocialEngineerArenaEnvironment(Environment[ArenaAction, ArenaObservation, ArenaState]):
