@@ -196,3 +196,42 @@ This environment turns that pressure into measurable learning loops.
 
 If your model can stay calm here,
 it might stay useful where it actually matters.
+
+---
+
+## Hackathon Links (Judge Quick Access)
+
+- Hugging Face Space: [SocialEngineerArena Space](https://huggingface.co/spaces/vinod2005/social-engineer-arena)
+- Colab Notebook (re-runnable training): `train_social_engineer_arena_colab.ipynb`
+- Mini-blog (project writeup): `blog.md`
+- Runbook (exact commands and checklist): `RUNBOOK.md`
+
+---
+
+## Evidence of Training
+
+Latest generated artifacts in this repo:
+
+- Learning curve: `outputs/local_training_curve_20260426_120238/loss_curve.png`
+- Reward curve: `assets/reward_curve.png`
+- Training logs: `outputs/logs/`
+- Baseline reward metrics: `outputs/evals/baseline_results.json`
+
+Latest small-model iteration summary:
+
+- Train split improvement: `0.1007 -> 0.3906` (`+0.2899`)
+- Test split improvement: `0.0424 -> 0.3321` (`+0.2897`)
+
+---
+
+## Training Pipelines Included
+
+- TRL SFT training: `scripts/train_suggest_model.py` -> `scripts/train_hf_job_sft.py`
+- TRL GRPO training (RL): `scripts/train_trl_grpo.py`
+- GRPO compatibility entrypoint: `scripts/train_grpo_placeholder.py`
+
+Quick GRPO run:
+
+```bash
+PYTHONUTF8=1 PYTHONIOENCODING=utf-8 MODEL_NAME=sshleifer/tiny-gpt2 OUTPUT_DIR=outputs/grpo_quick MAX_STEPS=4 NUM_GENERATIONS=2 MAX_PROMPTS=64 python scripts/train_trl_grpo.py
+```

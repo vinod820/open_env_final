@@ -1,4 +1,6 @@
-# SocialEngineerArena Outputs Explained (Beginner Friendly)
+# Training LLMs to Resist Social Engineering: Building SocialEngineerArena with OpenEnv
+
+## Outputs Explained (Beginner Friendly)
 
 This guide explains the project outputs in simple language.
 If you are new to ML, you should still be able to understand what happened after running training or evaluation.
