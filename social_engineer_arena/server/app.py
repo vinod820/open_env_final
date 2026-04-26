@@ -12,7 +12,7 @@ from typing import Any
 from urllib import error, request
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel, Field
 try:
     from openenv.core.env_server import create_web_interface_app
@@ -67,11 +67,41 @@ def _resolve_train_script() -> Path:
             candidate = _repo_root() / candidate
         if candidate.exists():
             return candidate
-    candidate = _repo_root() / "scripts" / "train_suggest_model.py"
-    if candidate.exists():
-        return candidate
+
+    search_roots = [_repo_root(), Path.cwd()]
+    for env_key in ("APP_HOME", "SPACE_WORKDIR", "HF_HOME"):
+        env_val = os.getenv(env_key, "").strip()
+        if env_val:
+            try:
+                search_roots.append(Path(env_val))
+            except Exception:
+                continue
+
+    checked: list[Path] = []
+    for root in search_roots:
+        candidate = root / "scripts" / "train_suggest_model.py"
+        checked.append(candidate)
+        if candidate.exists():
+            return candidate
+
+    # Fallback: shallow recursive search for script filename.
+    seen_roots: set[str] = set()
+    for root in search_roots:
+        root_key = str(root.resolve()) if root.exists() else str(root)
+        if root_key in seen_roots or not root.exists():
+            continue
+        seen_roots.add(root_key)
+        try:
+            for candidate in root.rglob("train_suggest_model.py"):
+                if candidate.is_file():
+                    return candidate
+        except Exception:
+            continue
+
     raise FileNotFoundError(
-        "Training script not found. Set TRAIN_SCRIPT_PATH or ensure scripts/train_suggest_model.py exists."
+        "Training script not found. Set TRAIN_SCRIPT_PATH or ensure scripts/train_suggest_model.py exists. "
+        + "Checked: "
+        + ", ".join(str(p) for p in checked)
     )
 
 
@@ -166,6 +196,87 @@ def _train_status_snapshot() -> dict[str, Any]:
             "error": _train_state.get("error"),
             "logs": list(_train_state.get("logs", [])),
         }
+
+
+def _extract_metric(line: str, key: str) -> float | None:
+    patterns = [
+        rf"[\"']{re.escape(key)}[\"']\s*:\s*(-?\d+(?:\.\d+)?)",
+        rf"\b{re.escape(key)}\s*=\s*(-?\d+(?:\.\d+)?)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, line)
+        if match:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                return None
+    return None
+
+
+def _train_insights_snapshot() -> dict[str, Any]:
+    status = _train_status_snapshot()
+    logs = status.get("logs", [])
+    points: list[dict[str, float]] = []
+    step = 0
+    for raw in logs:
+        line = str(raw)
+        loss = _extract_metric(line, "loss")
+        reward = _extract_metric(line, "reward")
+        if loss is None and reward is None:
+            continue
+        step += 1
+        point: dict[str, float] = {"step": float(step)}
+        if loss is not None:
+            point["loss"] = loss
+        if reward is not None:
+            point["reward"] = reward
+        points.append(point)
+
+    baseline_path = _repo_root() / "outputs" / "evals" / "baseline_results.json"
+    baseline_metrics: dict[str, Any] = {}
+    baseline_summary: dict[str, Any] = {}
+    if baseline_path.exists():
+        try:
+            baseline_metrics = json.loads(baseline_path.read_text(encoding="utf-8"))
+            delta_metrics = baseline_metrics.get("delta_metrics")
+            runs = baseline_metrics.get("runs")
+            baseline_summary = {
+                "delta_metrics": delta_metrics if isinstance(delta_metrics, list) else [],
+                "run_count": len(runs) if isinstance(runs, list) else 0,
+                "path": str(baseline_path.relative_to(_repo_root())),
+            }
+        except Exception:
+            baseline_metrics = {}
+            baseline_summary = {}
+
+    summaries: list[dict[str, Any]] = []
+    outputs_root = _repo_root() / "outputs"
+    if outputs_root.exists():
+        for summary_path in sorted(outputs_root.glob("submission_*/summary*.json"), reverse=True)[:6]:
+            try:
+                summary_obj = json.loads(summary_path.read_text(encoding="utf-8"))
+            except Exception:
+                summary_obj = {}
+            summaries.append(
+                {
+                    "path": str(summary_path.relative_to(_repo_root())),
+                    "data": summary_obj,
+                }
+            )
+
+    curves = []
+    for filename in ["loss_curve.png", "reward_curve.png", "grpo_reward_curve.png"]:
+        p = _repo_root() / "assets" / filename
+        curves.append({"name": filename, "path": f"/artifacts/image/{filename}", "exists": p.exists()})
+
+    return {
+        "status": status,
+        "live_points": points[-200:],
+        "baseline_metrics": baseline_metrics,
+        "baseline_summary": baseline_summary,
+        "latest_summaries": summaries,
+        "curves": curves,
+    }
 
 
 def _suggest_prompt(obs: ArenaObservation) -> str:
@@ -480,6 +591,259 @@ def attach_showcase_routes(app: FastAPI) -> None:
     def api_train_status() -> dict[str, Any]:
         return _train_status_snapshot()
 
+    @app.get("/train/insights")
+    def train_insights() -> dict[str, Any]:
+        return _train_insights_snapshot()
+
+    @app.get("/api/train/insights")
+    def api_train_insights() -> dict[str, Any]:
+        return _train_insights_snapshot()
+
+    @app.get("/artifacts/image/{filename}")
+    def artifact_image(filename: str) -> FileResponse:
+        allowed = {"loss_curve.png", "reward_curve.png", "grpo_reward_curve.png"}
+        if filename not in allowed:
+            raise HTTPException(status_code=404, detail="Artifact not found.")
+        image_path = _repo_root() / "assets" / filename
+        if not image_path.exists():
+            raise HTTPException(status_code=404, detail=f"{filename} not available yet.")
+        return FileResponse(path=image_path, media_type="image/png")
+
+    @app.get("/insights/live", response_class=HTMLResponse)
+    def live_learning_page() -> str:
+        return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Live Learning Insights</title>
+  <style>
+    :root { --bg:#0c1022; --card:#161c36; --line:#2a3668; --txt:#ecf1ff; --muted:#a9b6db; --ok:#57e29d; --warn:#ffd166; --bad:#ff6b88; --accent:#7c6dff; }
+    body { margin:0; font-family:Inter,Segoe UI,system-ui,sans-serif; background:var(--bg); color:var(--txt); }
+    .wrap { max-width:1100px; margin:0 auto; padding:18px; display:grid; gap:12px; position:relative; }
+    .close-x { position:absolute; top:8px; right:8px; width:34px; height:34px; border-radius:999px; display:grid; place-items:center; text-decoration:none; color:#ecf1ff; border:1px solid var(--line); background:rgba(255,255,255,0.08); font-weight:700; font-size:18px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
+    .row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+    button { border:0; border-radius:10px; padding:10px 14px; cursor:pointer; font-weight:700; background:linear-gradient(90deg,var(--accent),#9670ff); color:white; }
+    button:disabled { opacity:.6; cursor:default; }
+    .status { font-weight:700; }
+    .running { color:var(--warn); } .completed { color:var(--ok); } .failed { color:var(--bad); } .idle { color:var(--muted); }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+    canvas { width:100%; height:220px; background:#0b1127; border:1px solid var(--line); border-radius:10px; }
+    pre { max-height:300px; overflow:auto; background:#0b1127; border:1px solid var(--line); border-radius:10px; padding:10px; white-space:pre-wrap; }
+    a { color:#c9d6ff; text-decoration:none; }
+    .small { color:var(--muted); font-size:13px; }
+    @media (max-width:900px) { .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="close-x" href="/arena" title="Back to home">×</a>
+    <div class="card">
+      <div class="row">
+        <h2 style="margin:0;">Live Learning Console</h2>
+        <a href="/insights/history">Previous Curves & Results</a>
+        <a href="/arena">Arena</a>
+      </div>
+      <p class="small">Click once to start training. This page streams live logs and plots learning metrics from current run output.</p>
+      <div class="row">
+        <button id="startBtn">Start Learning</button>
+        <span id="status" class="status idle">status: idle</span>
+      </div>
+      <div class="small" id="metaLine">No active run yet.</div>
+    </div>
+
+    <div class="grid">
+      <div class="card">
+        <h3 style="margin-top:0;">Live Loss Curve</h3>
+        <canvas id="lossCanvas" width="520" height="220"></canvas>
+      </div>
+      <div class="card">
+        <h3 style="margin-top:0;">Live Reward Curve</h3>
+        <canvas id="rewardCanvas" width="520" height="220"></canvas>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3 style="margin-top:0;">Live Logs (tail)</h3>
+      <pre id="logs">(waiting for run...)</pre>
+    </div>
+  </div>
+
+  <script>
+    const statusEl = document.getElementById("status");
+    const metaEl = document.getElementById("metaLine");
+    const logsEl = document.getElementById("logs");
+    const startBtn = document.getElementById("startBtn");
+
+    function setStatus(status) {
+      statusEl.textContent = "status: " + status;
+      statusEl.className = "status " + (status || "idle");
+      startBtn.disabled = status === "running";
+    }
+
+    function drawSeries(canvasId, points, key, color) {
+      const canvas = document.getElementById(canvasId);
+      const ctx = canvas.getContext("2d");
+      const w = canvas.width, h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+      ctx.strokeStyle = "rgba(255,255,255,0.15)";
+      for (const y of [0.25, 0.5, 0.75]) {
+        ctx.beginPath(); ctx.moveTo(0, h * y); ctx.lineTo(w, h * y); ctx.stroke();
+      }
+      const values = points.map(p => p[key]).filter(v => Number.isFinite(v));
+      if (!values.length) return;
+      const min = Math.min(...values);
+      const max = Math.max(...values);
+      const span = Math.max(1e-6, max - min);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2;
+      let idx = 0;
+      const total = values.length - 1 || 1;
+      ctx.beginPath();
+      for (const p of points) {
+        if (!Number.isFinite(p[key])) continue;
+        const x = (idx / total) * (w - 10) + 5;
+        const y = h - 10 - ((p[key] - min) / span) * (h - 20);
+        if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        idx += 1;
+      }
+      ctx.stroke();
+    }
+
+    async function refresh() {
+      try {
+        const res = await fetch("/train/insights");
+        const data = await res.json();
+        const st = data.status || {};
+        setStatus(st.status || "idle");
+        metaEl.textContent = `started: ${st.started_at || "-"} | finished: ${st.finished_at || "-"} | exit: ${st.exit_code ?? "-"} | pid: ${st.pid ?? "-"}`;
+        const logs = Array.isArray(st.logs) ? st.logs : [];
+        logsEl.textContent = logs.slice(-120).join("\\n") || "(no logs yet)";
+        const points = Array.isArray(data.live_points) ? data.live_points : [];
+        drawSeries("lossCanvas", points, "loss", "#7c6dff");
+        drawSeries("rewardCanvas", points, "reward", "#00d8c2");
+      } catch (e) {
+        logsEl.textContent = "Failed to fetch insights: " + (e.message || e);
+      }
+    }
+
+    async function startLearning() {
+      try {
+        startBtn.disabled = true;
+        const res = await fetch("/train", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ push_to_hub: false, max_steps: 40 })
+        });
+        const out = await res.json();
+        if (!res.ok) throw new Error(out.detail || "Failed to start training");
+        await refresh();
+      } catch (e) {
+        alert(String(e.message || e));
+      } finally {
+        await refresh();
+      }
+    }
+
+    startBtn.addEventListener("click", startLearning);
+    refresh();
+    setInterval(refresh, 2000);
+  </script>
+</body>
+</html>"""
+
+    @app.get("/insights/history", response_class=HTMLResponse)
+    def history_page() -> str:
+        return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Training Results Archive</title>
+  <style>
+    :root { --bg:#0c1022; --card:#161c36; --line:#2a3668; --txt:#ecf1ff; --muted:#a9b6db; }
+    body { margin:0; font-family:Inter,Segoe UI,system-ui,sans-serif; background:var(--bg); color:var(--txt); }
+    .wrap { max-width:1120px; margin:0 auto; padding:18px; display:grid; gap:12px; position:relative; }
+    .close-x { position:absolute; top:8px; right:8px; width:34px; height:34px; border-radius:999px; display:grid; place-items:center; text-decoration:none; color:#ecf1ff; border:1px solid var(--line); background:rgba(255,255,255,0.08); font-weight:700; font-size:18px; }
+    .card { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; }
+    .grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; }
+    img { width:100%; border:1px solid var(--line); border-radius:10px; background:#0b1127; min-height:180px; object-fit:contain; }
+    .img-slot { border:1px solid var(--line); border-radius:10px; background:#0b1127; min-height:180px; display:grid; place-items:center; color:var(--muted); font-size:12px; text-align:center; padding:8px; }
+    pre { max-height:300px; overflow:auto; background:#0b1127; border:1px solid var(--line); border-radius:10px; padding:10px; white-space:pre-wrap; }
+    a { color:#c9d6ff; text-decoration:none; margin-right:10px; }
+    .small { color:var(--muted); font-size:13px; }
+    @media (max-width:980px) { .grid { grid-template-columns:1fr; } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <a class="close-x" href="/arena" title="Back to home">×</a>
+    <div class="card">
+      <h2 style="margin:0 0 8px;">Previous Curves & Results</h2>
+      <a href="/insights/live">Live Learning</a>
+      <a href="/arena">Arena</a>
+      <p class="small">This page shows saved training curves and the latest evaluation summaries from prior runs.</p>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Saved Curves</h3>
+      <div class="grid">
+        <div><div class="small">Reward curve</div><div class="img-slot" id="slot-reward"><img id="img-reward" alt="reward curve" /></div></div>
+        <div><div class="small">Loss curve</div><div class="img-slot" id="slot-loss"><img id="img-loss" alt="loss curve" /></div></div>
+        <div><div class="small">GRPO reward curve</div><div class="img-slot" id="slot-grpo"><img id="img-grpo" alt="grpo reward curve" /></div></div>
+      </div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0;">Latest Metrics Snapshot</h3>
+      <pre id="metrics">(loading...)</pre>
+    </div>
+  </div>
+  <script>
+    function bindImage(imgId, slotId, path, exists) {
+      const img = document.getElementById(imgId);
+      const slot = document.getElementById(slotId);
+      if (!exists || !path) {
+        img.style.display = "none";
+        slot.textContent = "Curve not available yet. Run training and generate plots.";
+        return;
+      }
+      img.style.display = "block";
+      img.src = new URL(path, window.location.origin).href;
+      img.onerror = () => {
+        img.style.display = "none";
+        slot.textContent = "Failed to load image from " + path;
+      };
+    }
+
+    async function loadHistory() {
+      const target = document.getElementById("metrics");
+      try {
+        const res = await fetch("/train/insights");
+        const data = await res.json();
+        const curveByName = {};
+        for (const c of (data.curves || [])) curveByName[c.name] = c;
+        const rewardCurve = curveByName["reward_curve.png"] || {};
+        const lossCurve = curveByName["loss_curve.png"] || {};
+        const grpoCurve = curveByName["grpo_reward_curve.png"] || {};
+        bindImage("img-reward", "slot-reward", rewardCurve.path, !!rewardCurve.exists);
+        bindImage("img-loss", "slot-loss", lossCurve.path, !!lossCurve.exists);
+        bindImage("img-grpo", "slot-grpo", grpoCurve.path, !!grpoCurve.exists);
+
+        const payload = {
+          baseline_summary: data.baseline_summary || {},
+          latest_summaries: data.latest_summaries || [],
+          latest_status: data.status || {}
+        };
+        target.textContent = JSON.stringify(payload, null, 2);
+      } catch (e) {
+        target.textContent = "Failed to load history: " + (e.message || e);
+      }
+    }
+    loadHistory();
+  </script>
+</body>
+</html>"""
+
     @app.get("/arena", response_class=HTMLResponse)
     def arena_showcase() -> str:
         return """<!doctype html>
@@ -533,7 +897,7 @@ def attach_showcase_routes(app: FastAPI) -> None:
     <div class="topbar">
       <div class="panel">
         <h1>SocialEngineerArena Control Center</h1>
-        <div class="sub">Production-ready interface for running episodes, validating actions, and tracking rewards in real time.</div>
+        <div class="sub">Production-ready interface for running episodes, validating actions, and tracking rewards in real time. <a href="/insights/live" style="color:#c9d6ff;">Live Learning</a> • <a href="/insights/history" style="color:#c9d6ff;">Previous Results</a></div>
         <div class="row">
           <div class="badge"><span class="health-dot" id="healthDot"></span>API: <strong id="apiStatus">checking...</strong></div>
           <div class="badge">Role: <strong id="rolePill">-</strong></div>
