@@ -325,6 +325,7 @@ def plot_losses(trainer: SFTTrainer, out_dir: Path) -> None:
 def main() -> None:
     out_dir = Path(OUTPUT_DIR)
     out_dir.mkdir(parents=True, exist_ok=True)
+    has_cuda = torch.cuda.is_available()
 
     train_ds = build_dataset("train")
     test_ds = build_dataset("test")
@@ -360,7 +361,9 @@ def main() -> None:
             eval_accumulation_steps=4 if EVAL_STRATEGY != "no" else None,
             save_steps=SAVE_STEPS,
             save_total_limit=2,
-            fp16=True,
+            fp16=has_cuda,
+            bf16=False,
+            use_cpu=not has_cuda,
             gradient_checkpointing=True,
             max_length=MAX_LENGTH,
             prediction_loss_only=True,
