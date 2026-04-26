@@ -3,11 +3,17 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import sys
+import threading
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from urllib import error, request
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
 try:
     from openenv.core.env_server import create_web_interface_app
 except ImportError:
@@ -18,6 +24,148 @@ from social_engineer_arena.server.environment import SocialEngineerArenaEnvironm
 
 
 env = SocialEngineerArenaEnvironment()
+TRAIN_LOG_LIMIT = 400
+TRAIN_SCRIPT_ENV = "TRAIN_SCRIPT_PATH"
+_train_lock = threading.Lock()
+_train_thread: threading.Thread | None = None
+_train_state: dict[str, Any] = {
+    "status": "idle",
+    "started_at": None,
+    "finished_at": None,
+    "exit_code": None,
+    "pid": None,
+    "command": None,
+    "overrides": {},
+    "logs": [],
+    "error": "",
+}
+
+
+class TrainRequest(BaseModel):
+    model_name: str | None = None
+    output_repo: str | None = None
+    output_dir: str | None = None
+    scenarios_path: str | None = None
+    data_multiplier: int | None = Field(default=None, ge=1)
+    max_steps: int | None = Field(default=None, ge=1)
+    learning_rate: float | None = Field(default=None, gt=0)
+    grad_accum_steps: int | None = Field(default=None, ge=1)
+    max_length: int | None = Field(default=None, ge=32)
+    eval_strategy: str | None = None
+    push_to_hub: bool | None = None
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _resolve_train_script() -> Path:
+    configured = os.getenv(TRAIN_SCRIPT_ENV, "").strip()
+    if configured:
+        candidate = Path(configured)
+        if not candidate.is_absolute():
+            candidate = _repo_root() / candidate
+        if candidate.exists():
+            return candidate
+    candidate = _repo_root() / "scripts" / "train_suggest_model.py"
+    if candidate.exists():
+        return candidate
+    raise FileNotFoundError(
+        "Training script not found. Set TRAIN_SCRIPT_PATH or ensure scripts/train_suggest_model.py exists."
+    )
+
+
+def _append_train_log(line: str) -> None:
+    with _train_lock:
+        logs = _train_state.setdefault("logs", [])
+        logs.append(line.rstrip("\n"))
+        if len(logs) > TRAIN_LOG_LIMIT:
+            del logs[: len(logs) - TRAIN_LOG_LIMIT]
+
+
+def _serialize_overrides(payload: TrainRequest) -> dict[str, str]:
+    env_overrides: dict[str, str] = {}
+    if payload.model_name:
+        env_overrides["MODEL_NAME"] = payload.model_name
+    if payload.output_repo:
+        env_overrides["OUTPUT_REPO"] = payload.output_repo
+    if payload.output_dir:
+        env_overrides["OUTPUT_DIR"] = payload.output_dir
+    if payload.scenarios_path:
+        env_overrides["SCENARIOS_PATH"] = payload.scenarios_path
+    if payload.data_multiplier is not None:
+        env_overrides["DATA_MULTIPLIER"] = str(payload.data_multiplier)
+    if payload.max_steps is not None:
+        env_overrides["MAX_STEPS"] = str(payload.max_steps)
+    if payload.learning_rate is not None:
+        env_overrides["LEARNING_RATE"] = str(payload.learning_rate)
+    if payload.grad_accum_steps is not None:
+        env_overrides["GRAD_ACCUM_STEPS"] = str(payload.grad_accum_steps)
+    if payload.max_length is not None:
+        env_overrides["MAX_LENGTH"] = str(payload.max_length)
+    if payload.eval_strategy:
+        env_overrides["EVAL_STRATEGY"] = payload.eval_strategy
+    if payload.push_to_hub is not None:
+        env_overrides["PUSH_TO_HUB"] = "1" if payload.push_to_hub else "0"
+    return env_overrides
+
+
+def _run_train_job(env_overrides: dict[str, str], command: list[str]) -> None:
+    global _train_thread
+    process: subprocess.Popen[str] | None = None
+    try:
+        child_env = os.environ.copy()
+        child_env.update(env_overrides)
+        process = subprocess.Popen(
+            command,
+            cwd=str(_repo_root()),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=child_env,
+        )
+        with _train_lock:
+            _train_state["pid"] = process.pid
+        _append_train_log(f"[train] started pid={process.pid}")
+        if process.stdout is not None:
+            for line in process.stdout:
+                _append_train_log(line)
+        exit_code = process.wait()
+        with _train_lock:
+            _train_state["status"] = "completed" if exit_code == 0 else "failed"
+            _train_state["exit_code"] = exit_code
+            _train_state["finished_at"] = datetime.now(UTC).isoformat()
+            _train_state["pid"] = None
+            if exit_code != 0 and not _train_state.get("error"):
+                _train_state["error"] = f"Training process exited with code {exit_code}."
+    except Exception as exc:
+        with _train_lock:
+            _train_state["status"] = "failed"
+            _train_state["error"] = str(exc)
+            _train_state["finished_at"] = datetime.now(UTC).isoformat()
+            _train_state["pid"] = None
+        _append_train_log(f"[train] error: {exc}")
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+        with _train_lock:
+            _train_thread = None
+
+
+def _train_status_snapshot() -> dict[str, Any]:
+    with _train_lock:
+        return {
+            "status": _train_state.get("status"),
+            "started_at": _train_state.get("started_at"),
+            "finished_at": _train_state.get("finished_at"),
+            "exit_code": _train_state.get("exit_code"),
+            "pid": _train_state.get("pid"),
+            "command": _train_state.get("command"),
+            "overrides": dict(_train_state.get("overrides", {})),
+            "error": _train_state.get("error"),
+            "logs": list(_train_state.get("logs", [])),
+        }
 
 
 def _suggest_prompt(obs: ArenaObservation) -> str:
@@ -240,6 +388,38 @@ def attach_showcase_routes(app: FastAPI) -> None:
             "raw_preview": preview,
         }
 
+    def train_handler(payload: TrainRequest) -> dict[str, Any]:
+        global _train_thread
+        with _train_lock:
+            if _train_state.get("status") == "running":
+                raise RuntimeError("Training is already running. Check /train/status for progress.")
+        script_path = _resolve_train_script()
+        env_overrides = _serialize_overrides(payload)
+        command = [sys.executable, str(script_path)]
+        with _train_lock:
+            _train_state.update(
+                {
+                    "status": "running",
+                    "started_at": datetime.now(UTC).isoformat(),
+                    "finished_at": None,
+                    "exit_code": None,
+                    "pid": None,
+                    "command": command,
+                    "overrides": env_overrides,
+                    "logs": [],
+                    "error": "",
+                }
+            )
+        worker = threading.Thread(
+            target=_run_train_job,
+            args=(env_overrides, command),
+            name="sea-train-worker",
+            daemon=True,
+        )
+        _train_thread = worker
+        worker.start()
+        return _train_status_snapshot()
+
     @app.post("/reset")
     def reset() -> ArenaObservation:
         return reset_handler()
@@ -259,6 +439,17 @@ def attach_showcase_routes(app: FastAPI) -> None:
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    @app.post("/train")
+    def train(payload: TrainRequest = TrainRequest()) -> dict[str, Any]:
+        try:
+            return train_handler(payload)
+        except (RuntimeError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/train/status")
+    def train_status() -> dict[str, Any]:
+        return _train_status_snapshot()
+
     @app.post("/api/reset")
     def api_reset() -> ArenaObservation:
         return reset_handler()
@@ -277,6 +468,17 @@ def attach_showcase_routes(app: FastAPI) -> None:
             return suggest_handler()
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/train")
+    def api_train(payload: TrainRequest = TrainRequest()) -> dict[str, Any]:
+        try:
+            return train_handler(payload)
+        except (RuntimeError, FileNotFoundError) as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/train/status")
+    def api_train_status() -> dict[str, Any]:
+        return _train_status_snapshot()
 
     @app.get("/arena", response_class=HTMLResponse)
     def arena_showcase() -> str:
