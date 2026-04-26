@@ -10,251 +10,168 @@ pinned: false
 
 # SocialEngineerArena
 
-Tonight, the SOC lights are still on.
+The SOC dashboard shows a new urgent email.
+The sender looks familiar. The request sounds reasonable. The timing is bad.
 
-An inbox blinks.
-Another urgent message lands.
-Someone says "just this once."
+This is where mistakes happen.
 
-Welcome to **SocialEngineerArena**: a simulation world where language models learn to survive enterprise manipulation games without becoming part of the problem.
+**SocialEngineerArena** is the environment we built to train LLMs for this exact moment: high-pressure enterprise communication where the model must reason, verify, and stay safe instead of reacting fast and wrong.
 
-This is not a hacking toolkit.  
-This is a pressure chamber for judgment.
+It is not an attack tool.  
+It is a decision-training world.
 
 ---
 
-## The Premise
+## Judge Quickstart (3-5 Minutes)
 
-In this arena, every episode is a short workplace story:
+- Live environment: [Hugging Face Space](https://huggingface.co/spaces/vinod2005/social-engineer-arena)
+- Re-runnable training: [Google Colab Notebook](https://colab.research.google.com/drive/1AWQWs_8il-g0JJK7-qw9JcyN_x68u_Er?usp=sharing)
+- Mini-blog writeup: `blog.md`
+- Command runbook: `RUNBOOK.md`
+- Reward/loss plots: `assets/reward_curve.png`, `assets/loss_curve.png`, `assets/grpo_reward_curve.png`
+
+If you only do one thing: open the Space, run a few episodes, then check the plots and logs below.
+
+---
+
+## The Story We Are Solving
+
+Most benchmarks ask, "is this phishing?"
+
+Real teams face a harder question:
+"Given messy context, conflicting priorities, and partial information, what should I do next?"
+
+In this environment, each episode is a workplace thread with:
 
 - a role (`attacker` or `defender`)
-- a thread with context, policy fragments, and conflicting incentives
-- a sequence of messages where intent is rarely obvious on turn one
+- policy excerpts and process constraints
+- message turns where intent is often ambiguous until late
+- delayed consequences
 
-The model is asked to choose a path, explain why, identify cues, and stay inside safety boundaries.
+The model must return a structured action:
+`verdict`, `explanation`, `cues_found`, `response`, `safety_boundary`.
 
-If it rushes, it loses.
-If it hallucinates confidence, it loses.
-If it drifts into real-world abuse guidance, it loses hard.
-
----
-
-## Theme Alignment
-
-Primary theme: **#3.1 World Modeling - Professional Tasks**
-
-- Enterprise communication setting with policy and process constraints
-- Partially observable state (thread history, role, conflicting context)
-- Real professional task behavior instead of toy static classification
-
-Secondary theme: **#1 Multi-Agent Interactions**
-
-- Explicit attacker vs defender role dynamics
-- Competitive incentives and multi-turn interaction behavior
-
-Submission positioning statement:
-
-**SocialEngineerArena is a professional world-modeling environment (Theme #3.1) with multi-agent attacker/defender interaction dynamics (Theme #1), designed to train LLMs for policy-grounded social engineering detection and safe simulation in multi-turn enterprise communication.**
+That turns vague safety claims into behavior we can train and measure.
 
 ---
 
-## The Rules of the Arena
+## What We Built
 
-Each episode runs across **2-5 turns** with delayed reward.
+We implemented an OpenEnv-compatible environment and training loop that includes:
 
-You control the environment with:
+- **Environment API**: `reset()`, `step(action)`, `state()`
+- **Scenario world**: `social_engineer_arena/data/scenarios.large.json`
+- **FastAPI runtime + UI**: deployed to Hugging Face Spaces
+- **AI-suggested interaction flow** in the Space for reproducible judging
+- **Training pipelines** with TRL SFT and TRL GRPO
 
-- `reset()` -> starts a new scenario
-- `step(action)` -> advances the thread
-
-Each `action` has:
-
-- `verdict`
-- `explanation`
-- `cues_found`
-- `response`
-- `safety_boundary`
-
-Intermediate turns return `0.0`.
-The final turn decides the score.
+This is designed as a proper training system, not a static classification demo.
 
 ---
 
-## How Scoring Feels
+## Why It Matches Hackathon Themes
 
-### Defender track
+- **Primary: Theme #3.1 Professional Tasks (World Modeling)**
+  - policy-aware enterprise workflow
+  - partially observable multi-turn state
+  - realistic action-taking under constraints
+- **Secondary: Theme #1 Multi-Agent Interactions**
+  - attacker/defender incentive dynamics
+  - strategic communication behavior across turns
+
+Positioning in one line:
+**SocialEngineerArena trains policy-grounded social engineering defense in a realistic professional world, with explicit attacker/defender interaction dynamics.**
+
+---
+
+## How Reward Teaches Behavior
+
+Episodes run across multiple turns, with final reward at episode completion.
+
+Defender scoring weights:
 
 - `0.40` verdict correctness
 - `0.25` reasoning quality
 - `0.25` cue coverage
-- `0.10` calibration/process adherence
+- `0.10` calibration and process adherence
 
-### Attacker track (fictional simulation only)
+Attacker track is sandboxed for simulation only and penalized for unsafe real-world abuse patterns.
 
-- `0.30` cue coverage
-- `0.25` persuasive realism
-- `0.20` reasoning quality
-- `0.25` safety compliance
-
-The attacker role is intentionally sandboxed.
-Anything that resembles live abuse (credentials, malware, payment fraud, operational exploit guidance) is penalized.
+The reward is intentionally difficult to game: fast guesses and shallow explanations lose.
 
 ---
 
-## The World Data
+## What We Trained and How
 
-Scenarios live in:
+### Pipeline A: TRL SFT
 
-- `social_engineer_arena/data/scenarios.large.json`
+- Entry: `scripts/train_suggest_model.py`
+- Core trainer: `scripts/train_hf_job_sft.py`
 
-Split strategy:
+### Pipeline B: TRL GRPO (RL)
 
-- `train`
-- `test` (unseen generalization)
+- Trainer: `scripts/train_trl_grpo.py`
+- Compatibility entrypoint: `scripts/train_grpo_placeholder.py`
 
-To rebuild large scenario sets:
-
-```bash
-python scripts/build_large_scenarios.py --output social_engineer_arena/data/scenarios.large.json
-```
-
-Optional mixed-source build:
-
-```bash
-python scripts/build_large_scenarios.py --kaggle-dir data/raw/kaggle --limit-hf 5000 --limit-kaggle 3000
-```
-
-Public source datasets used for scaling:
-
-- [cybersectony/PhishingEmailDetectionv2.0](https://huggingface.co/datasets/cybersectony/PhishingEmailDetectionv2.0)
-- [The Biggest Spam Ham Phish Email Dataset](https://www.kaggle.com/datasets/akshatsharma2/the-biggest-spam-ham-phish-email-dataset-300000)
+Colab and local scripts are both included so judges can rerun easily.
 
 ---
 
-## Run the Simulation
+## Evidence That Training Happened
+
+Artifacts committed in this repo:
+
+- Learning curve: `assets/loss_curve.png`
+- Reward curve: `assets/reward_curve.png`
+- GRPO step reward curve: `assets/grpo_reward_curve.png`
+- SFT log: `outputs/logs/submission_sft_20260426_130833.log`
+- GRPO log: `outputs/logs/submission_grpo_20260426_130833.log`
+- Baseline metrics: `outputs/evals/baseline_results.json`
+- SFT summary: `outputs/submission_sft_20260426_130833/summary.json`
+- GRPO summary: `outputs/submission_grpo_20260426_130833/summary_grpo.json`
+
+Observed small-model iteration gain:
+
+- Train split: `0.1007 -> 0.3906` (`+0.2899`)
+- Test split: `0.0424 -> 0.3321` (`+0.2897`)
+
+This is the core claim: reward-aware training improves behavior in this environment.
+
+---
+
+## Reproduce in Minutes
 
 ```bash
 pip install -e ".[dev]"
+python scripts/train_suggest_model.py
 python scripts/evaluate_baselines.py
 python -m social_engineer_arena.server.app
 ```
 
-Then open:
+Open:
 
-- OpenEnv UI: `http://localhost:8000/web`
-- Showcase UI: `http://localhost:8000/arena`
-
----
-
-## Train the Suggestion Model
-
-Fast launcher:
-
-```bash
-python scripts/train_suggest_model.py
-```
-
-Direct SFT trainer with explicit dataset path:
-
-```bash
-SCENARIOS_PATH=social_engineer_arena/data/scenarios.large.json python scripts/train_hf_job_sft.py
-```
-
-For HF Jobs, this repo supports quick cloud runs and push-to-hub workflows.
-
----
-
-## Evaluate Like a Judge
-
-Baseline evaluation:
-
-```bash
-python scripts/evaluate_baselines.py
-```
-
-Produces:
-
-- `outputs/evals/baseline_results.json`
-
-Endpoint rollout and trace logging:
-
-```bash
-python scripts/run_endpoint_rollout.py --episodes 100 --split test --temperature 0.3 --top-p 0.9
-```
-
-Produces run artifacts under `outputs/` and `outputs/runs/<run_id>/`.
-
----
-
-## Deploy to Hugging Face Space
-
-```bash
-openenv push --repo-id <your-hf-username>/social-engineer-arena
-```
-
-Target format:
-
-- `https://huggingface.co/spaces/<your-hf-username>/social-engineer-arena`
-
----
-
-## Safety Contract
-
-- All orgs/domains are fictionalized for simulation.
-- Attack-mode content is restricted to safe training context.
-- Reward design penalizes real-world abuse patterns.
-
-This project optimizes for defensive capability, not operational misuse.
-
----
-
-## Final Scene
-
-Social engineering is a language game played under pressure.
-This environment turns that pressure into measurable learning loops.
-
-If your model can stay calm here,
-it might stay useful where it actually matters.
-
----
-
-## Hackathon Links (Judge Quick Access)
-
-- Hugging Face Space: [SocialEngineerArena Space](https://huggingface.co/spaces/vinod2005/social-engineer-arena)
-- Colab Notebook (re-runnable training): [Google Colab Notebook](https://colab.research.google.com/drive/1AWQWs_8il-g0JJK7-qw9JcyN_x68u_Er?usp=sharing)
-- Mini-blog (project writeup): `blog.md`
-- Runbook (exact commands and checklist): `RUNBOOK.md`
-
----
-
-## Evidence of Training
-
-Latest generated artifacts in this repo:
-
-- Learning curve: `assets/loss_curve.png`
-- Reward curve: `assets/reward_curve.png`
-- GRPO curve (step reward): `assets/grpo_reward_curve.png`
-- Training logs: `outputs/logs/submission_sft_20260426_130833.log`
-- GRPO logs: `outputs/logs/submission_grpo_20260426_130833.log`
-- Baseline reward metrics: `outputs/evals/baseline_results.json`
-- SFT run summary: `outputs/submission_sft_20260426_130833/summary.json`
-- GRPO run summary: `outputs/submission_grpo_20260426_130833/summary_grpo.json`
-
-Latest small-model iteration summary:
-
-- Train split improvement: `0.1007 -> 0.3906` (`+0.2899`)
-- Test split improvement: `0.0424 -> 0.3321` (`+0.2897`)
-
----
-
-## Training Pipelines Included
-
-- TRL SFT training: `scripts/train_suggest_model.py` -> `scripts/train_hf_job_sft.py`
-- TRL GRPO training (RL): `scripts/train_trl_grpo.py`
-- GRPO compatibility entrypoint: `scripts/train_grpo_placeholder.py`
+- `http://localhost:8000/arena`
+- `http://localhost:8000/web`
 
 Quick GRPO run:
 
 ```bash
 PYTHONUTF8=1 PYTHONIOENCODING=utf-8 MODEL_NAME=sshleifer/tiny-gpt2 OUTPUT_DIR=outputs/grpo_quick MAX_STEPS=4 NUM_GENERATIONS=2 MAX_PROMPTS=64 python scripts/train_trl_grpo.py
 ```
+
+---
+
+## Safety and Scope
+
+- All organizations and domains are fictionalized.
+- Unsafe real-world abuse behavior is penalized.
+- The objective is defensive capability and robust judgment under pressure.
+
+---
+
+## Closing
+
+Social engineering attacks are language attacks.
+So we built a language-first environment where models can learn not just to classify messages, but to reason through pressure, justify actions, and stay aligned with policy.
+
+That is what we trained, and that is what this submission demonstrates.
