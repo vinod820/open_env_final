@@ -39,6 +39,25 @@ If it drifts into real-world abuse guidance, it loses hard.
 
 ---
 
+## Theme Alignment
+
+Primary theme: **#3.1 World Modeling - Professional Tasks**
+
+- Enterprise communication setting with policy and process constraints
+- Partially observable state (thread history, role, conflicting context)
+- Real professional task behavior instead of toy static classification
+
+Secondary theme: **#1 Multi-Agent Interactions**
+
+- Explicit attacker vs defender role dynamics
+- Competitive incentives and multi-turn interaction behavior
+
+Submission positioning statement:
+
+**SocialEngineerArena is a professional world-modeling environment (Theme #3.1) with multi-agent attacker/defender interaction dynamics (Theme #1), designed to train LLMs for policy-grounded social engineering detection and safe simulation in multi-turn enterprise communication.**
+
+---
+
 ## The Rules of the Arena
 
 Each episode runs across **2-5 turns** with delayed reward.
@@ -202,7 +221,7 @@ it might stay useful where it actually matters.
 ## Hackathon Links (Judge Quick Access)
 
 - Hugging Face Space: [SocialEngineerArena Space](https://huggingface.co/spaces/vinod2005/social-engineer-arena)
-- Colab Notebook (re-runnable training): `train_social_engineer_arena_colab.ipynb`
+- Colab Notebook (re-runnable training): [Google Colab Notebook](https://colab.research.google.com/drive/1AWQWs_8il-g0JJK7-qw9JcyN_x68u_Er?usp=sharing)
 - Mini-blog (project writeup): `blog.md`
 - Runbook (exact commands and checklist): `RUNBOOK.md`
 
@@ -212,10 +231,14 @@ it might stay useful where it actually matters.
 
 Latest generated artifacts in this repo:
 
-- Learning curve: `outputs/local_training_curve_20260426_120238/loss_curve.png`
+- Learning curve: `assets/loss_curve.png`
 - Reward curve: `assets/reward_curve.png`
-- Training logs: `outputs/logs/`
+- GRPO curve (step reward): `assets/grpo_reward_curve.png`
+- Training logs: `outputs/logs/submission_sft_20260426_130833.log`
+- GRPO logs: `outputs/logs/submission_grpo_20260426_130833.log`
 - Baseline reward metrics: `outputs/evals/baseline_results.json`
+- SFT run summary: `outputs/submission_sft_20260426_130833/summary.json`
+- GRPO run summary: `outputs/submission_grpo_20260426_130833/summary_grpo.json`
 
 Latest small-model iteration summary:
 

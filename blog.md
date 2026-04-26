@@ -1,194 +1,129 @@
 # Training LLMs to Resist Social Engineering: Building SocialEngineerArena with OpenEnv
 
-## Outputs Explained (Beginner Friendly)
+Social engineering is rarely a one-shot trick. It is a multi-turn pressure game: urgency, authority framing, policy bypass requests, and context manipulation over time.
 
-This guide explains the project outputs in simple language.
-If you are new to ML, you should still be able to understand what happened after running training or evaluation.
+Our goal with **SocialEngineerArena** is simple:
+train language models to make safer, policy-grounded decisions in those situations, while still supporting fictional red-team simulation for defender training.
 
----
+## Live demo
 
-## Big Picture
+- Hugging Face Space: [https://huggingface.co/spaces/vinod2005/social-engineer-arena](https://huggingface.co/spaces/vinod2005/social-engineer-arena)
+- Training notebook (Colab): [https://colab.research.google.com/drive/1AWQWs_8il-g0JJK7-qw9JcyN_x68u_Er?usp=sharing](https://colab.research.google.com/drive/1AWQWs_8il-g0JJK7-qw9JcyN_x68u_Er?usp=sharing)
 
-When you run this project, it creates different kinds of outputs:
+## How to use the Space
 
-- **Model files** (the trained brain)
-- **Metrics files** (numbers that tell if it improved)
-- **Rollout logs** (what happened in each episode)
-- **Plots/images** (quick visual summary)
+1. Open the Space URL and wait for the app to become ready.
+2. Click **Start Episode** to load a scenario.
+3. Review the message context (role, policy excerpt, thread history).
+4. Use **Suggest Action** to get model-generated JSON action.
+5. Edit/submit via **Submit Action** and observe reward + breakdown.
+6. Repeat across multiple episodes to inspect consistency.
+7. Use API routes (`/reset`, `/step`, `/suggest`, `/train`, `/train/status`) for automation.
 
-Think of it like exam results:
+## Visual snapshots
 
-- model files = your final answer sheet
-- metrics = your score report
-- logs = step-by-step rough work
+### Reward improvement curve
 
----
+![Reward curve](assets/reward_curve.png)
 
-## 1) Hugging Face Model Repo Outputs
+### Training loss curve (local submission run)
 
-Example repo: `vinod2005/social-engineer-arena-suggest`
+![Loss curve](assets/loss_curve.png)
 
-Common files you will see there:
+### GRPO run curve (step reward)
 
-- `model.safetensors`  
-  The actual trained model weights. This is the most important file.
+![GRPO reward curve](assets/grpo_reward_curve.png)
 
-- `config.json`  
-  Model settings (architecture info, label mappings, etc.).
+## Why this environment
 
-- `tokenizer.json` and `tokenizer_config.json`  
-  Rules for converting text into tokens and back.
+Most LLM safety tasks are static classification problems. Real enterprise communication is not.
 
-- `generation_config.json`  
-  Default text generation settings.
+This environment models:
 
-- `training_args.bin`  
-  Training configuration saved by Transformers.
+- multi-turn message threads
+- attacker and defender roles
+- delayed rewards at episode end
+- policy context and conflicting business pressure
 
-- `README.md` (model card)  
-  Human-readable info about the model.
+That makes it a better training target for real-world decision behavior.
 
-### How to interpret
+## What we built
 
-If these files exist in the model repo, your model push was successful.
+We built an OpenEnv-compatible environment with:
 
----
+- role-aware observations (`attacker`/`defender`)
+- structured JSON actions (`verdict`, `explanation`, `cues_found`, `response`, `safety_boundary`)
+- composable reward logic for defensive correctness, cue coverage, reasoning quality, and safety compliance
+- a FastAPI runtime + Space deployment
 
-## 2) Training Console Outputs (what logs mean)
+## Training pipelines
 
-During training, you may see lines like:
+We implemented two training paths:
 
-- `loss`
-- `grad_norm`
-- `learning_rate`
-- `mean_token_accuracy`
-- `train_runtime`
-- `train_steps_per_second`
+1. **TRL SFT pipeline**  
+   `scripts/train_suggest_model.py` -> `scripts/train_hf_job_sft.py`
 
-### Simple meaning
+2. **TRL GRPO pipeline (RL)**  
+   `scripts/train_trl_grpo.py`  
+   (also wired through `scripts/train_grpo_placeholder.py` for compatibility)
 
-- **loss**: Lower is usually better.  
-  It means "how wrong the model currently is."
+A re-runnable Colab is included and linked from README.
 
-- **mean_token_accuracy**: Higher is better.  
-  Roughly how often token predictions are correct.
+## Evidence from real runs
 
-- **learning_rate**: Step size for learning.  
-  Not a score, just a control value.
+### Baseline reward improvement
 
-- **train_runtime**: Total training time.
+From `outputs/evals/baseline_results.json`:
 
-- **train_steps_per_second**: Training speed.
+- **Train split:** `0.1007 -> 0.3906` (`+0.2899`)
+- **Test split:** `0.0424 -> 0.3321` (`+0.2897`)
 
-### Example from your recent run
+This indicates meaningful gain from rubric-aware behavior over weak baseline behavior.
 
-- Train steps: `35/35` (training finished)
-- Final train loss: around `1.032`
-- Mean token accuracy rose to around `0.9288`
-- Model upload reached `100%`
+### Artifact files
 
-This means training itself completed and the model artifacts were uploaded.
+- Loss curve: `assets/loss_curve.png`
+- Reward curve: `assets/reward_curve.png`
+- GRPO step reward curve: `assets/grpo_reward_curve.png`
+- SFT logs: `outputs/logs/submission_sft_20260426_130833.log`
+- GRPO logs: `outputs/logs/submission_grpo_20260426_130833.log`
+- SFT summary: `outputs/submission_sft_20260426_130833/summary.json`
+- GRPO summary: `outputs/submission_grpo_20260426_130833/summary_grpo.json`
 
----
+## What worked best
 
-## 3) Local Evaluation Outputs
+The strongest practical strategy was:
 
-When running baseline evaluation (`scripts/evaluate_baselines.py`):
+- start with small models for fast loops
+- improve reward signal quality first
+- run many short iterations
+- scale up model/compute only after reward and behavior are stable
 
-- `outputs/evals/baseline_results.json`
+This gave better progress than trying to force a very large model too early.
 
-### What this contains
+## Quick reproducibility commands
 
-- scores for weak baseline vs rubric-aware baseline
-- split-wise results (`train`, `test`)
-- deltas showing improvement
+```bash
+python scripts/train_suggest_model.py
+python scripts/evaluate_baselines.py
+python scripts/make_reward_plot.py
+python scripts/train_trl_grpo.py
+```
 
-### How to interpret
+## Safety approach
 
-If rubric-aware score is higher than weak baseline, your reward logic is helping model behavior.
+The environment is explicitly safety-constrained:
 
----
+- all scenarios are fictionalized
+- attack-mode outputs are penalized for real abuse patterns
+- rewards favor process adherence and defensive verification
 
-## 4) Endpoint Rollout Outputs
+## What we would improve next
 
-When running endpoint rollouts (`scripts/run_endpoint_rollout.py`), output files include:
-
-- `outputs/endpoint_rollout.jsonl`
-- `outputs/endpoint_rollout.csv`
-- `outputs/endpoint_rollout_reward.png`
-- plus archived copies in `outputs/runs/<run_id>/...`
-
-### What each file is for
-
-- **JSONL**: One episode per line (detailed, machine-friendly).
-- **CSV**: Same idea in table format (Excel-friendly).
-- **PNG reward plot**: Visual trend of reward over episodes.
-- **summary.json**: short summary of the run.
-
-### How to interpret quickly
-
-- more positive rewards = generally better behavior
-- high parse success + stable rewards = healthier endpoint behavior
+- stronger structured-output guarantees in GRPO completions
+- richer long-horizon scenarios with harder delayed reward credit assignment
+- additional “before vs after” qualitative episode walkthroughs for judges
 
 ---
 
-## 5) API Outputs from the App
-
-The app endpoints return structured JSON:
-
-- `POST /reset` -> new scenario observation
-- `POST /step` -> next observation + reward + done
-- `POST /suggest` -> model-generated action suggestion
-- `POST /train` -> starts background training
-- `GET /train/status` -> current training status/logs
-
-### What to check first
-
-- `status` in `/train/status`:
-  - `running` = still training
-  - `completed` = finished successfully
-  - `failed` = ended with error
-
-- `exit_code`:
-  - `0` usually means success
-  - non-zero means failure
-
----
-
-## 6) Why a job can show "timeout" even after success
-
-This can happen when:
-
-1. training and upload finished, but
-2. extra post-training steps run too long (like reward evaluation), and
-3. job hits timeout before clean exit
-
-So always verify model repo files on Hugging Face.
-If `model.safetensors` and tokenizer files are present, the core model push likely succeeded.
-
----
-
-## 7) Practical "Is my run good?" checklist
-
-Use this quick checklist:
-
-- [ ] Training reached final step count (`N/N`)
-- [ ] Final loss lower than early loss
-- [ ] Model files exist on HF repo
-- [ ] Endpoint rollout rewards are not all near zero
-- [ ] No major parsing failures in rollout logs
-
-If most are true, your run is healthy.
-
----
-
-## Final Note
-
-You do not need perfect metrics in one run.
-For this project, the key is:
-
-- safe behavior,
-- stable improvement,
-- and reproducible outputs.
-
-That is already a strong result.
+SocialEngineerArena is not just a benchmark. It is a training loop for safer decision behavior under realistic communication pressure.
